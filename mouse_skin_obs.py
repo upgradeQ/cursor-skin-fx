@@ -1,16 +1,9 @@
 import obspython as obs
 from mouse import get_position  # python -m pip install mouse
 
-__version__ = "0.1.0"
-REFRESH_RATE = 150
+__version__ = "0.1.1"
+REFRESH_RATE = 45
 FLAG = True
-
-
-def get_scene_item_pos(scene_item):
-    """source: https://github.com/insin/obs-bounce (lua script)"""
-    pos = obs.vec2()
-    obs.obs_sceneitem_get_pos(scene_item, pos)
-    return pos
 
 
 class CursorAsSource:
@@ -28,12 +21,11 @@ class CursorAsSource:
             scene = obs.obs_scene_from_source(scene_source)
             scene_item = obs.obs_scene_find_source(scene, self.source_name)
             if scene_item:
-                original_pos = get_scene_item_pos(scene_item)
                 next_pos = obs.vec2()
                 next_pos.x, next_pos.y = get_position()
                 next_pos.x -= scene_width / 2
                 next_pos.y -= scene_height / 2
-                # get new position and set it to center of source where cursor is
+                # set position to center of source where cursor is
                 obs.obs_sceneitem_set_pos(scene_item, next_pos)
             obs.obs_scene_release(scene)
             obs.obs_source_release(source)
@@ -56,7 +48,7 @@ def stop_pressed(props, prop):
 
 
 def start_pressed(props, prop):
-    global FLAG #to keep only one timer callback
+    global FLAG  # to keep only one timer callback
     if py_cursor.source_name != "" and FLAG:
         obs.timer_add(py_cursor.ticker, REFRESH_RATE)
     py_cursor.lock = True
@@ -81,7 +73,7 @@ def script_update(settings):
 def script_properties():  # ui
     props = obs.obs_properties_create()
     number = obs.obs_properties_add_int(
-        props, "refresh_rate", "How fast update", 15, 999, 15
+        props, "refresh_rate", "Refresh rate (ms)", 15, 999, 15
     )
     p = obs.obs_properties_add_list(
         props,
