@@ -1,8 +1,8 @@
 import obspython as obs
 from mouse import get_position  # python -m pip install mouse
 
-__version__ = "0.1.1"
-REFRESH_RATE = 45
+__version__ = "0.1.2"
+REFRESH_RATE = 15
 FLAG = True
 
 
@@ -73,7 +73,7 @@ def script_update(settings):
 def script_properties():  # ui
     props = obs.obs_properties_create()
     number = obs.obs_properties_add_int(
-        props, "refresh_rate", "Refresh rate (ms)", 15, 999, 15
+        props, "refresh_rate", "Refresh rate (ms)", 15, 300, 5
     )
     p = obs.obs_properties_add_list(
         props,
