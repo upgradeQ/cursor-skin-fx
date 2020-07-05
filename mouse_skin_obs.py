@@ -1,7 +1,7 @@
 import obspython as obs
 from mouse import get_position  # python -m pip install mouse
 
-__version__ = "0.1.2"
+__version__ = "0.2.0-alpha"  
 REFRESH_RATE = 15
 FLAG = True
 
@@ -30,10 +30,35 @@ class CursorAsSource:
             obs.obs_scene_release(scene)
             obs.obs_source_release(source)
 
+    def update_crop(self):
+        """
+        Create 2 display captures.
+        Create crop filter with this name: cropXY
+        Check relative.
+        Set Width and Height to relatively small numbers e.g : 64x64 .
+        Run script,select this source as cursor source , check Update crop, click start
+        """
+        source = obs.obs_get_source_by_name(self.source_name)
+        crop = obs.obs_source_get_filter_by_name(source, "cropXY")
+        filter_settings = obs.obs_source_get_settings(crop)
+
+        _x, _y = get_position()
+        # https://github.com/obsproject/obs-studio/blob/79981889c6d87d6e371e9dc8fcaad36f06eb9c9e/plugins/obs-filters/crop-filter.c#L87-L93
+        obs.obs_data_set_int(filter_settings, "left", _x)
+        obs.obs_data_set_int(filter_settings, "top", _y)
+
+        obs.obs_source_update(crop, filter_settings)
+
+        obs.obs_data_release(filter_settings)
+        obs.obs_source_release(source)
+        obs.obs_source_release(crop)
+
     def ticker(self):
         """ how fast update.One callback at time with lock"""
         if self.lock:
             self.update_cursor()
+            if self.update_xy:
+                self.update_crop()
         if not self.lock:
             obs.remove_current_callback()
 
@@ -66,6 +91,7 @@ def script_defaults(settings):
 
 def script_update(settings):
     global REFRESH_RATE
+    py_cursor.update_xy = obs.obs_data_get_bool(settings, "bool_yn")
     py_cursor.source_name = obs.obs_data_get_string(settings, "source")
     REFRESH_RATE = obs.obs_data_get_int(settings, "refresh_rate")
 
@@ -91,4 +117,5 @@ def script_properties():  # ui
         obs.source_list_release(sources)
     obs.obs_properties_add_button(props, "button", "Stop", stop_pressed)
     obs.obs_properties_add_button(props, "button2", "Start", start_pressed)
+    obs.obs_properties_add_bool(props, "bool_yn", "Update crop")
     return props
