@@ -1,7 +1,7 @@
 import obspython as obs
 from mouse import get_position  # python -m pip install mouse
 
-__version__ = "0.2.0-alpha"  
+__version__ = "0.2.0"
 REFRESH_RATE = 15
 FLAG = True
 
@@ -27,16 +27,19 @@ class CursorAsSource:
                 next_pos.y -= scene_height / 2
                 # set position to center of source where cursor is
                 obs.obs_sceneitem_set_pos(scene_item, next_pos)
+
+            obs.obs_data_release(settings)
             obs.obs_scene_release(scene)
             obs.obs_source_release(source)
 
     def update_crop(self):
         """
         Create 2 display captures.
-        Create crop filter with this name: cropXY
+        Create crop filter with this name: cropXY.
         Check relative.
         Set Width and Height to relatively small numbers e.g : 64x64 .
-        Run script,select this source as cursor source , check Update crop, click start
+        Image mask blend + color correction might be an option too.
+        Run script,select this source as cursor source , check Update crop, click start.
         """
         source = obs.obs_get_source_by_name(self.source_name)
         crop = obs.obs_source_get_filter_by_name(source, "cropXY")
@@ -44,8 +47,11 @@ class CursorAsSource:
 
         _x, _y = get_position()
         # https://github.com/obsproject/obs-studio/blob/79981889c6d87d6e371e9dc8fcaad36f06eb9c9e/plugins/obs-filters/crop-filter.c#L87-L93
-        obs.obs_data_set_int(filter_settings, "left", _x)
-        obs.obs_data_set_int(filter_settings, "top", _y)
+        w = obs.obs_data_get_int(filter_settings, "cx")
+        h = obs.obs_data_get_int(filter_settings, "cy")
+        h, w = int(h / 2), int(w / 2)
+        obs.obs_data_set_int(filter_settings, "left", _x - h)
+        obs.obs_data_set_int(filter_settings, "top", _y - w)
 
         obs.obs_source_update(crop, filter_settings)
 
@@ -56,9 +62,12 @@ class CursorAsSource:
     def ticker(self):
         """ how fast update.One callback at time with lock"""
         if self.lock:
-            self.update_cursor()
             if self.update_xy:
                 self.update_crop()
+                self.update_cursor()
+            else:
+                self.update_cursor()
+
         if not self.lock:
             obs.remove_current_callback()
 
