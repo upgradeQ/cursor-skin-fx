@@ -3,7 +3,7 @@ Selected source will  follow mouse pointer.
 Using [`obs_sceneitem_set_pos`](https://obsproject.com/docs/reference-scenes.html#c.obs_sceneitem_set_pos) 
 # Installation 
 - Make sure your OBS Studio supports [scripting](https://obsproject.com/docs/scripting.html)
-- Download and extract source code from [here](https://github.com/upgradeQ/OBS-Studio-Cursor-skin/releases/tag/0.1.2)
+- Download and extract source code from [here](https://github.com/upgradeQ/OBS-Studio-Cursor-skin/releases/tag/0.2.0)
 - You will need to install mouse package from [pypi](https://pypi.org/project/mouse/):  
 `python -m pip install mouse`
 # Usage
