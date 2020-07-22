@@ -1,9 +1,15 @@
 import obspython as obs
 from mouse import get_position  # python -m pip install mouse
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 REFRESH_RATE = 15
 FLAG = True
+
+
+def apply_scale(x, y, width, height):
+    width = round(width * x)
+    height = round(height * y)
+    return width, height
 
 
 class CursorAsSource:
@@ -21,6 +27,11 @@ class CursorAsSource:
             scene = obs.obs_scene_from_source(scene_source)
             scene_item = obs.obs_scene_find_source(scene, self.source_name)
             if scene_item:
+                scale = obs.vec2()
+                obs.obs_sceneitem_get_scale(scene_item, scale)
+                scene_width, scene_height = apply_scale(
+                    scale.x, scale.y, scene_width, scene_height
+                )
                 next_pos = obs.vec2()
                 next_pos.x, next_pos.y = get_position()
                 next_pos.x -= scene_width / 2
