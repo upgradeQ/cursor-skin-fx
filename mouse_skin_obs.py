@@ -1,7 +1,7 @@
 import obspython as obs
 from mouse import get_position  # python -m pip install mouse
 
-__version__ = "0.2.1"
+__version__ = "0.3.0-alpha"
 REFRESH_RATE = 15
 FLAG = True
 
@@ -16,8 +16,13 @@ class CursorAsSource:
     def __init__(self, source_name=None):
         self.source_name = source_name
         self.lock = True
+        self.update_xy = False
+        self.update_gs = False  # green screen
+        self.update_cr = False
 
     def update_cursor(self):
+        """ in script settings check update cursor"""
+
         source = obs.obs_get_source_by_name(self.source_name)
         settings = obs.obs_data_create()
         if source is not None:
@@ -43,6 +48,50 @@ class CursorAsSource:
             obs.obs_scene_release(scene)
             obs.obs_source_release(source)
 
+    def update_green(self):
+        """
+        create new scene with name:__spotlight__
+        add color source , add opacity(color correction) to that source
+        add green circle 
+        add that scene as source to ur current scene 
+        apply chromakey filter to that source 
+        in script settings check update green
+        """
+        source = obs.obs_get_source_by_name(self.source_name)
+        settings = obs.obs_data_create()
+        if source is not None:
+            scene_width = obs.obs_source_get_width(source)
+            scene_height = obs.obs_source_get_height(source)
+            # get all scenes
+            scenes = obs.obs_frontend_get_scenes()
+            for sc in scenes:
+                # select the one with chromakey cursor(green)
+                name = obs.obs_source_get_name(sc)
+                if name == "__spotlight__":
+                    # assign it
+                    _item = sc
+                else:
+                    obs.obs_source_release(sc)
+
+            scene = obs.obs_scene_from_source(_item)
+            scene_item = obs.obs_scene_find_source(scene, self.source_name)
+            if scene_item:
+                scale = obs.vec2()
+                obs.obs_sceneitem_get_scale(scene_item, scale)
+                scene_width, scene_height = apply_scale(
+                    scale.x, scale.y, scene_width, scene_height
+                )
+                next_pos = obs.vec2()
+                next_pos.x, next_pos.y = get_position()
+                next_pos.x -= scene_width / 2
+                next_pos.y -= scene_height / 2
+                # set position to center of source where cursor is
+                obs.obs_sceneitem_set_pos(scene_item, next_pos)
+
+            obs.obs_data_release(settings)
+            obs.obs_scene_release(scene)
+            obs.obs_source_release(source)
+
     def update_crop(self):
         """
         Create 2 display captures.
@@ -50,7 +99,7 @@ class CursorAsSource:
         Check relative.
         Set Width and Height to relatively small numbers e.g : 64x64 .
         Image mask blend + color correction might be an option too.
-        Run script,select this source as cursor source , check Update crop, click start.
+        Run script,select this source as cursor source , check Update crop and updated cursor, click start.
         """
         source = obs.obs_get_source_by_name(self.source_name)
         crop = obs.obs_source_get_filter_by_name(source, "cropXY")
@@ -76,7 +125,9 @@ class CursorAsSource:
             if self.update_xy:
                 self.update_crop()
                 self.update_cursor()
-            else:
+            if self.update_gs:
+                self.update_green()
+            if self.update_cr:
                 self.update_cursor()
 
         if not self.lock:
@@ -112,6 +163,8 @@ def script_defaults(settings):
 def script_update(settings):
     global REFRESH_RATE
     py_cursor.update_xy = obs.obs_data_get_bool(settings, "bool_yn")
+    py_cursor.update_xy = obs.obs_data_get_bool(settings, "bool_yn_cursor")
+    py_cursor.update_gs = obs.obs_data_get_bool(settings, "bool_yn_green")
     py_cursor.source_name = obs.obs_data_get_string(settings, "source")
     REFRESH_RATE = obs.obs_data_get_int(settings, "refresh_rate")
 
@@ -138,4 +191,6 @@ def script_properties():  # ui
     obs.obs_properties_add_button(props, "button", "Stop", stop_pressed)
     obs.obs_properties_add_button(props, "button2", "Start", start_pressed)
     obs.obs_properties_add_bool(props, "bool_yn", "Update crop")
+    obs.obs_properties_add_bool(props, "bool_yn_green", "Update green circle")
+    obs.obs_properties_add_bool(props, "bool_yn_cursor", "Update cursro ")
     return props
