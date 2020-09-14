@@ -3,7 +3,7 @@ Selected source will  follow mouse pointer.
 Using [`obs_sceneitem_set_pos`](https://obsproject.com/docs/reference-scenes.html#c.obs_sceneitem_set_pos) 
 # Installation 
 - Make sure your OBS Studio supports [scripting](https://obsproject.com/docs/scripting.html)
-- You will need to install pynput package from [pypi](hhttps://pypi.org/project/pynput/):  
+- Install pynput package from [pypi](https://pypi.org/project/pynput/) 
 `python -m pip install pynput`
 # Limitations
 - Multilpe monitors setup will not work .
