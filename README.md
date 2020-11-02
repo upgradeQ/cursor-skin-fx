@@ -21,6 +21,14 @@ Zoom or higlight.
 - Image mask blend + color correction might be an option too.
 - Run script,select this source as cursor source , check Update crop, click start.
 
+# Zoom
+> Have you ever needed to zoom in on your screen to show some fine detail work,
+> or to make your large 4k/ultrawide monitor less daunting?
+> Zoom and Follow for OBS Studio does exactly that, zooms in on your mouse and follows it around.
+> Configurable and low-impact, you can now do old school Camtasia zoom ins live
+
+See: [Zoom and Follow](https://obsproject.com/forum/resources/zoom-and-follow.1051/) , [source code ](https://github.com/tryptech/obs-zoom-and-follow)
+
 # Example cursors
 They all have some level of transparency.
 - yellow circle 
