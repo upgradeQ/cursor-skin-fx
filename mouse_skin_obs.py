@@ -24,8 +24,6 @@ class CursorAsSource:
     refresh_rate = 15
 
     def update_cursor(self):
-        global last_pos, current_pos, next_pos
-        next_pos = obs.vec2()
         source = obs.obs_get_source_by_name(self.source_name)
         settings = obs.obs_data_create()
         if source is not None:
@@ -41,10 +39,12 @@ class CursorAsSource:
                 scene_width, scene_height = apply_scale(
                     scale.x, scale.y, scene_width, scene_height
                 )
+                
+                next_pos = obs.vec2()
                 next_pos.x, next_pos.y = get_position()
                 next_pos.x -= self.offset_x
                 next_pos.y -= self.offset_y
-                ## base: 1920*1080, i should add something to make this automatic
+                ## base: 1920*1080, i should add something to make this automatically change based on the Desktop Capture used
                 ## maybe make it able to use multiple monitors as well?
                 ratio_x = next_pos.x/1920
                 ratio_y = next_pos.y/1080
@@ -159,16 +159,18 @@ def script_properties():
         obs.OBS_COMBO_FORMAT_STRING,
     )
     sources = obs.obs_enum_sources()
-    ## wtf am i doing
     if sources is not None:
+        ## property 1 for image source
         for source in sources:
             source_id = obs.obs_source_get_unversioned_id(source)
             name = obs.obs_source_get_name(source)
             obs.obs_property_list_add_string(p1, name, name)
+        ## property 2 for target window    
         for target in sources:
             source_id = obs.obs_source_get_unversioned_id(target)
             name = obs.obs_source_get_name(target)
             obs.obs_property_list_add_string(p2, name, name)
+            
         obs.source_list_release(sources)
     obs.obs_properties_add_button(props, "button", "Stop", stop_pressed)
     obs.obs_properties_add_button(props, "button2", "Start", start_pressed)
