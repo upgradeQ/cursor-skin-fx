@@ -5,7 +5,6 @@ The main purpose of this fork is to be able to make a precise custom cursor, lik
 Selected source will  follow mouse pointer.
 Using [`obs_sceneitem_set_pos`](https://obsproject.com/docs/reference-scenes.html#c.obs_sceneitem_set_pos) 
 # Installation 
-- If you have no idea where to start, start by installing Python **3.6**
 - Install pynput package from [pypi](https://pypi.org/project/pynput/) 
 - Make sure your OBS Studio supports [scripting](https://obsproject.com/docs/scripting.html)
 `python -m pip install pynput`
