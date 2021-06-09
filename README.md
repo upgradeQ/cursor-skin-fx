@@ -1,4 +1,5 @@
 Fork by 3_4_700, original by upgradeQ
+The main purpose of this fork is to be able to make a precise custom cursor, like a handdrawn arm holding a pen for artists
 
 # OBS Studio Cursor skin
 Selected source will  follow mouse pointer.
