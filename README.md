@@ -12,7 +12,9 @@ Using [`obs_sceneitem_set_pos`](https://obsproject.com/docs/reference-scenes.htm
 - Create a _source_ with desired cursor(e.g Image source or Media source).
 - In scripts select _that_ source name.
 - Make a group, add Display Capture, Window Capture
-![img](https://i.imgur.com/CHuLwmp.png)
+
+[img](https://i.imgur.com/CHuLwmp.png)
+
 - To crop, crop the _group_, the size should still have the same ratio as your monitor even if you scale it
 - To set offset, adjust it at Scripts (use Tab/Shift+tab to navigate). You have to do this every time you change the scale
 - Test it: press Start, press Stop, tweak refresh rate.
