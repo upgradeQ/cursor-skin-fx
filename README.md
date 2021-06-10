@@ -20,11 +20,11 @@ Using [`obs_sceneitem_set_pos`](https://obsproject.com/docs/reference-scenes.htm
 ![img](https://i.imgur.com/CHuLwmp.png)
 
 - To crop, crop the _group_, the size should still have the same ratio as your monitor even if you scale it
-- To set offset/calibrate, use the Display Capture to see mouse and adjust it at Scripts (or use Tab/Shift+tab to navigate if in Window Capture to noe move mouse). You have to do this every time you change the Group scale
+- To set offset/calibrate, use the Display Capture to see mouse and adjust it at Scripts (or use Tab/Shift+tab to navigate if in Window Capture to not move mouse). You have to do this every time you change the Group scale/move the Group
 
-![img]![2021-06-10 07_34_12-Window](https://user-images.githubusercontent.com/66927691/121442471-56133280-c9be-11eb-9bb4-ad12b2e4ebfb.jpg)
+![img](https://user-images.githubusercontent.com/66927691/121442471-56133280-c9be-11eb-9bb4-ad12b2e4ebfb.jpg)
 
-![img]![2021-06-10 07_38_28-Window](https://user-images.githubusercontent.com/66927691/121442809-f23d3980-c9be-11eb-954f-c0e635e95d88.jpg)
+![img](https://user-images.githubusercontent.com/66927691/121442809-f23d3980-c9be-11eb-954f-c0e635e95d88.jpg)
 
 
 - Test it: press Start, press Stop, tweak refresh rate.
