@@ -4,6 +4,7 @@ from pynput.mouse import Controller  # python -m pip install pynput
 c = Controller()
 get_position = lambda: c.position
 
+
 __version__ = "1.0.0"
 
 
@@ -12,6 +13,9 @@ def apply_scale(x, y, width, height):
     height = round(height * y)
     return width, height
 
+def lerp(minVal, maxVal, k):
+    val = minVal + ((maxVal - minVal)*k)
+    return val
 
 class CursorAsSource:
     source_name = None
@@ -28,17 +32,31 @@ class CursorAsSource:
             scene_height = obs.obs_source_get_height(source)
             scene = obs.obs_scene_from_source(scene_source)
             scene_item = obs.obs_scene_find_source(scene, self.source_name)
+            target_item = obs.obs_scene_find_source(scene, self.target_name)
             if scene_item:
                 scale = obs.vec2()
                 obs.obs_sceneitem_get_scale(scene_item, scale)
                 scene_width, scene_height = apply_scale(
                     scale.x, scale.y, scene_width, scene_height
                 )
+                
                 next_pos = obs.vec2()
                 next_pos.x, next_pos.y = get_position()
-                next_pos.x -= scene_width / 2
-                next_pos.y -= scene_height / 2
-                # set position to center of source where cursor is
+                next_pos.x -= self.offset_x
+                next_pos.y -= self.offset_y
+                ## base: 1920*1080, i should add something to make this automatically change based on the Desktop Capture used
+                ## maybe make it able to use multiple monitors as well?
+                ratio_x = next_pos.x/1920
+                ratio_y = next_pos.y/1080
+                
+                target_scale = obs.vec2()
+                target = obs.obs_get_source_by_name(self.target_name)
+                obs.obs_sceneitem_get_scale(target_item, target_scale)
+                target_x = obs.obs_source_get_width(target) * target_scale.x 
+                target_y = obs.obs_source_get_height(target) * target_scale.y
+                
+                next_pos.x = lerp(0, target_x, ratio_x)
+                next_pos.y = lerp(0, target_y, ratio_y)
                 obs.obs_sceneitem_set_pos(scene_item, next_pos)
 
             obs.obs_data_release(settings)
@@ -107,7 +125,10 @@ def script_defaults(settings):
 def script_update(settings):
     py_cursor.update_xy = obs.obs_data_get_bool(settings, "bool_yn")
     py_cursor.source_name = obs.obs_data_get_string(settings, "source")
+    py_cursor.target_name = obs.obs_data_get_string(settings, "target")
     py_cursor.refresh_rate = obs.obs_data_get_int(settings, "_refresh_rate")
+    py_cursor.offset_x = obs.obs_data_get_int(settings, "_offset_x")
+    py_cursor.offset_y = obs.obs_data_get_int(settings, "_offset_y")
 
 
 def script_properties():
@@ -115,19 +136,41 @@ def script_properties():
     number = obs.obs_properties_add_int(
         props, "_refresh_rate", "Refresh rate (ms)", 15, 300, 5
     )
-    p = obs.obs_properties_add_list(
+    ## i am only winging this so please forgive me
+    offsetx = obs.obs_properties_add_int(
+        props, "_offset_x", "Offset X", -5000, 5000, 1
+    )
+    offsety = obs.obs_properties_add_int(
+        props, "_offset_y", "Offset Y", -5000, 5000, 1
+    )
+    
+    p1 = obs.obs_properties_add_list(
         props,
         "source",
         "Select cursor source",
         obs.OBS_COMBO_TYPE_EDITABLE,
         obs.OBS_COMBO_FORMAT_STRING,
     )
+    p2 = obs.obs_properties_add_list(
+        props,
+        "target",
+        "Select target window",
+        obs.OBS_COMBO_TYPE_EDITABLE,
+        obs.OBS_COMBO_FORMAT_STRING,
+    )
     sources = obs.obs_enum_sources()
     if sources is not None:
+        ## property 1 for image source
         for source in sources:
             source_id = obs.obs_source_get_unversioned_id(source)
             name = obs.obs_source_get_name(source)
-            obs.obs_property_list_add_string(p, name, name)
+            obs.obs_property_list_add_string(p1, name, name)
+        ## property 2 for target window    
+        for target in sources:
+            source_id = obs.obs_source_get_unversioned_id(target)
+            name = obs.obs_source_get_name(target)
+            obs.obs_property_list_add_string(p2, name, name)
+            
         obs.source_list_release(sources)
     obs.obs_properties_add_button(props, "button", "Stop", stop_pressed)
     obs.obs_properties_add_button(props, "button2", "Start", start_pressed)
