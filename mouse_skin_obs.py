@@ -3,7 +3,7 @@ from contextlib import contextmanager, ExitStack
 from types import SimpleNamespace as dot
 from pynput.mouse import Controller  # python -m pip install pynput
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 c = Controller()
 get_position = lambda: c.position
 
@@ -91,6 +91,7 @@ def send_mouse_move_to_browser(
 G = dot()
 
 G.LMB = G.RMB = G.MOUSE_HOOKED = False
+# Not yet implemented functionality for mouse up/down events
 
 
 def HTK_1_CB(pressed):
@@ -142,8 +143,34 @@ class CursorAsSource:
     width = 1920
     height = 1080
     is_update_browser = False
+    use_lerp = False
 
-    def update_cursor_on_scene(self):
+    def update_cursor_on_scene1(self):
+        """pixel to pixel precision"""
+        ctx = ExitStack().enter_context
+        source = ctx(source_auto_release(self.source_name))
+        settings = ctx(data_ar())
+        if source is not None:
+            scene_width = S.obs_source_get_width(source)
+            scene_height = S.obs_source_get_height(source)
+
+            scene_source = S.obs_frontend_get_current_scene()
+            scene = ctx(scene_from_source_ar(scene_source))
+            scene_item = S.obs_scene_find_source_recursive(scene, self.source_name)
+            if scene_item:
+                scale = S.vec2()
+                S.obs_sceneitem_get_scale(scene_item, scale)
+                scene_width, scene_height = apply_scale(
+                    scale.x, scale.y, scene_width, scene_height
+                )
+                next_pos = S.vec2()
+                next_pos.x, next_pos.y = get_position()
+                next_pos.x -= self.offset_x
+                next_pos.y -= self.offset_y
+                S.obs_sceneitem_set_pos(scene_item, next_pos)
+
+    def update_cursor_on_scene2(self):
+        """lerp with scale precision(hide parts of window)"""
         ctx = ExitStack().enter_context
         source = ctx(source_auto_release(self.source_name))
         settings = ctx(data_ar())
@@ -180,6 +207,12 @@ class CursorAsSource:
                 next_pos.y = lerp(0, target_y, ratio_y)
                 S.obs_sceneitem_set_pos(scene_item, next_pos)
 
+    def update_cursor_on_scene(self):
+        if not self.use_lerp:
+            self.update_cursor_on_scene1()
+        else:
+            self.update_cursor_on_scene2()
+
     def update_cursor_inside_browser_source(self):
         with source_auto_release(self.browser_source_name) as source:
             send_mouse_move_to_browser(source, *get_position())
@@ -195,40 +228,53 @@ class CursorAsSource:
             S.remove_current_callback()
 
 
-py_cursor = CursorAsSource()
+PY_CURSOR = CursorAsSource()
 hook_mouse_buttons()
 ###############               ###############               ###############
 
 
 def stop_pressed(props, prop):
-    py_cursor.flag = True
-    py_cursor.lock = False
+    PY_CURSOR.flag = True
+    PY_CURSOR.lock = False
 
 
 def start_pressed(props, prop):
-    if py_cursor.flag:
-        S.timer_add(py_cursor.ticker, py_cursor.refresh_rate)
-    py_cursor.lock = True
-    py_cursor.flag = False  # to keep only one timer callback
+    if PY_CURSOR.flag:
+        S.timer_add(PY_CURSOR.ticker, PY_CURSOR.refresh_rate)
+    PY_CURSOR.lock = True
+    PY_CURSOR.flag = False  # to keep only one timer callback
+
+
+def react_property(props, prop, settings):
+    p = S.obs_properties_get(props, "target")
+    p2 = S.obs_properties_get(props, "browser")
+    p3 = S.obs_properties_get(props, "_width")
+    p4 = S.obs_properties_get(props, "_height")
+    S.obs_property_set_visible(p, PY_CURSOR.use_lerp)
+    S.obs_property_set_visible(p3, PY_CURSOR.use_lerp)
+    S.obs_property_set_visible(p4, PY_CURSOR.use_lerp)
+    S.obs_property_set_visible(p2, PY_CURSOR.is_update_browser)
+    return True
 
 
 def script_defaults(settings):
-    S.obs_data_set_default_int(settings, "_refresh_rate", py_cursor.refresh_rate)
-    S.obs_data_set_default_int(settings, "_width", py_cursor.width)
-    S.obs_data_set_default_int(settings, "_height", py_cursor.height)
+    S.obs_data_set_default_int(settings, "_refresh_rate", PY_CURSOR.refresh_rate)
+    S.obs_data_set_default_int(settings, "_width", PY_CURSOR.width)
+    S.obs_data_set_default_int(settings, "_height", PY_CURSOR.height)
 
 
 def script_update(settings):
-    py_cursor.source_name = S.obs_data_get_string(settings, "source")
-    py_cursor.target_name = S.obs_data_get_string(settings, "target")
-    py_cursor.refresh_rate = S.obs_data_get_int(settings, "_refresh_rate")
-    py_cursor.offset_x = S.obs_data_get_int(settings, "_offset_x")
-    py_cursor.offset_y = S.obs_data_get_int(settings, "_offset_y")
+    PY_CURSOR.source_name = S.obs_data_get_string(settings, "source")
+    PY_CURSOR.target_name = S.obs_data_get_string(settings, "target")
+    PY_CURSOR.refresh_rate = S.obs_data_get_int(settings, "_refresh_rate")
+    PY_CURSOR.offset_x = S.obs_data_get_int(settings, "_offset_x")
+    PY_CURSOR.offset_y = S.obs_data_get_int(settings, "_offset_y")
 
-    py_cursor.width = S.obs_data_get_int(settings, "_width")
-    py_cursor.width = S.obs_data_get_int(settings, "_height")
-    py_cursor.browser_source_name = S.obs_data_get_string(settings, "browser")
-    py_cursor.is_update_browser = S.obs_data_get_bool(settings, "_is_update_browser")
+    PY_CURSOR.width = S.obs_data_get_int(settings, "_width")
+    PY_CURSOR.width = S.obs_data_get_int(settings, "_height")
+    PY_CURSOR.browser_source_name = S.obs_data_get_string(settings, "browser")
+    PY_CURSOR.is_update_browser = S.obs_data_get_bool(settings, "_is_update_browser")
+    PY_CURSOR.use_lerp = S.obs_data_get_bool(settings, "_use_lerp")
 
 
 def script_properties():
@@ -239,10 +285,6 @@ def script_properties():
     ## i am only winging this so please forgive me
     S.obs_properties_add_int(props, "_offset_x", "Offset X", -5000, 5000, 1)
     S.obs_properties_add_int(props, "_offset_y", "Offset Y", -5000, 5000, 1)
-
-    S.obs_properties_add_int(props, "_width", "base width", 1, 99999, 1)
-    S.obs_properties_add_int(props, "_height", "base height", 1, 99999, 1)
-
     p1 = S.obs_properties_add_list(
         props,
         "source",
@@ -250,6 +292,14 @@ def script_properties():
         S.OBS_COMBO_TYPE_EDITABLE,
         S.OBS_COMBO_FORMAT_STRING,
     )
+    bool1 = S.obs_properties_add_bool(props, "_use_lerp", "Use special mode")
+    S.obs_property_set_modified_callback(bool1, react_property)
+    n1 = S.obs_properties_add_int(props, "_width", "base width", 1, 99999, 1)
+    n2 = S.obs_properties_add_int(props, "_height", "base height", 1, 99999, 1)
+    S.obs_property_set_visible(n1, PY_CURSOR.use_lerp)
+    S.obs_property_set_visible(n2, PY_CURSOR.use_lerp)
+    S.obs_property_set_modified_callback(n1, react_property)
+    S.obs_property_set_modified_callback(n2, react_property)
     p2 = S.obs_properties_add_list(
         props,
         "target",
@@ -257,8 +307,9 @@ def script_properties():
         S.OBS_COMBO_TYPE_EDITABLE,
         S.OBS_COMBO_FORMAT_STRING,
     )
-
-    S.obs_properties_add_bool(props, "_is_update_browser", "Use browser source")
+    S.obs_property_set_visible(p2, PY_CURSOR.use_lerp)
+    bool2 = S.obs_properties_add_bool(props, "_is_update_browser", "Use browser source")
+    S.obs_property_set_modified_callback(bool2, react_property)
     p3 = S.obs_properties_add_list(
         props,
         "browser",
@@ -266,6 +317,7 @@ def script_properties():
         S.OBS_COMBO_TYPE_EDITABLE,
         S.OBS_COMBO_FORMAT_STRING,
     )
+    S.obs_property_set_visible(p3, PY_CURSOR.is_update_browser)
 
     sources = S.obs_enum_sources()
     if sources is not None:
@@ -287,3 +339,17 @@ def script_properties():
     S.obs_properties_add_button(props, "button", "Stop", stop_pressed)
     S.obs_properties_add_button(props, "button2", "Start", start_pressed)
     return props
+
+
+description = """
+<h2>Version : {__version__}</h2>
+<a href="https://github.com/upgradeQ/OBS-Studio-Cursor-skin"> Webpage </a>
+<h3 style="color:orange">Authors</h3>
+<a href="https://github.com/upgradeQ"> upgradeQ </a> <br>
+<a href="https://github.com/3_4_700"> 34700 </a>
+""".format(**locals())
+
+
+def script_description():
+    print(description,"Released under MIT license")
+    return description
