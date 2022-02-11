@@ -3,7 +3,7 @@ from contextlib import contextmanager, ExitStack
 from types import SimpleNamespace as dot
 from pynput.mouse import Controller  # python -m pip install pynput
 
-__version__ = "2.1.0"
+__version__ = "2.1.1"
 c = Controller()
 get_position = lambda: c.position
 
@@ -271,7 +271,7 @@ def script_update(settings):
     PY_CURSOR.offset_y = S.obs_data_get_int(settings, "_offset_y")
 
     PY_CURSOR.width = S.obs_data_get_int(settings, "_width")
-    PY_CURSOR.width = S.obs_data_get_int(settings, "_height")
+    PY_CURSOR.height = S.obs_data_get_int(settings, "_height")
     PY_CURSOR.browser_source_name = S.obs_data_get_string(settings, "browser")
     PY_CURSOR.is_update_browser = S.obs_data_get_bool(settings, "_is_update_browser")
     PY_CURSOR.use_lerp = S.obs_data_get_bool(settings, "_use_lerp")
