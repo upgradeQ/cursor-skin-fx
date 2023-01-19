@@ -11,6 +11,9 @@ Using [`obs_sceneitem_set_pos`](https://obsproject.com/docs/reference-scenes.htm
 # Usage
 - Create a _source_ with desired cursor(e.g Image source or Media source).
 - In scripts select _that_ source name.
+- To center source (scene item ) go to:  Transform > Edit Transform > Positional Alignment > Center
+
+## Advanced usage
 - Make a group, add Display Capture, Window Capture.
 
 ![img](https://i.imgur.com/CHuLwmp.png)
@@ -34,7 +37,7 @@ Using [`obs_sceneitem_set_pos`](https://obsproject.com/docs/reference-scenes.htm
 > Have you ever needed to zoom in on your screen to show some fine detail work,
 > or to make your large 4k/ultrawide monitor less daunting?
 > Zoom and Follow for OBS Studio does exactly that, zooms in on your mouse and follows it around.
-> Configurable and low-impact, you can now do old school Camtasia zoom ins live
+> Configurable and low-impact, you can now do old school zoom ins live
 
 See: [Zoom and Follow](https://obsproject.com/forum/resources/zoom-and-follow.1051/) , [source code ](https://github.com/tryptech/obs-zoom-and-follow)
 
@@ -48,14 +51,25 @@ They all have some level of transparency.
 ![Imgur](https://i.imgur.com/s3jvZP5.png) 
 
 # On the Roadmap
-- Visual indicator of mouse up/down state.
 - Lua based shaders rendering (on mouse up, down, trail, etc...)
-- Custom web page rendering (on mouse up, down, trail, etc...)
+- Custom web pages 
+- Visual indicator of mouse up/down state.
 
 # Acknowledgments
 - [`3_4_700`](https://github.com/34700) added offsets functionality for precise custom cursor(like a hand drawn arm holding a pen for artists)
 - [`tholman/cursor-effects`](https://github.com/tholman/cursor-effects) - stock cursor trails
 
 # Contribute
+You are welcome to contribute. Help is needed.
+## Developing
+There are roadmap items to choose, you are also free to suggest ideas to add and implement. There are forums and GitHub Issues check them out for suggestions or bug reports.
  [Forks](https://help.github.com/articles/fork-a-repo) are a great way to contribute to a repository.
 After forking a repository, you can send the original author a [pull request](https://help.github.com/articles/using-pull-requests)
+## Marketing 
+Write articles, reviews or tell your friends about it. The more users we have, the more people we have testing and the better we can become.
+## Design 
+Come up with some new good skins or interactive web skins, and add them.
+## Voting
+In order to improve this scripting functionality and integrate it into OBS Studio, you are encouraged to vote for this feature:
+https://ideas.obsproject.com/posts/71/option-to-highlight-mouse-cursor-and-mouse-clicks
+Currently the program lacks a way to get the position of the cursor in the texture and is not available in the OBS Studio shader language. 

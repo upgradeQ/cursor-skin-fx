@@ -1,9 +1,11 @@
 import obspython as S  # studio
 from contextlib import contextmanager, ExitStack
-from types import SimpleNamespace as dot
-from pynput.mouse import Controller  # python -m pip install pynput
+from itertools import cycle
+from pynput.mouse import (
+    Controller,
+)  # There mighbt be an import error try run this command: python -m pip install pynput
 
-__version__ = "2.1.1"
+__version__ = "2.2.0"
 c = Controller()
 get_position = lambda: c.position
 
@@ -88,40 +90,6 @@ def send_mouse_move_to_browser(
     S.obs_source_send_mouse_move(source, event, False)  # do not leave
 
 
-G = dot()
-
-G.LMB = G.RMB = G.MOUSE_HOOKED = False
-# Not yet implemented functionality for mouse up/down events
-
-
-def HTK_1_CB(pressed):
-    G.LMB = pressed
-
-
-def HTK_2_CB(pressed):
-    G.RMB = pressed
-
-
-def hook_mouse_buttons():
-    if G.MOUSE_HOOKED:
-        raise RuntimeError("already hooked mouse")
-    key_1 = '{"htk_1_mouse": [ { "key": "OBS_KEY_MOUSE1" } ], '
-    key_2 = '"htk_2_mouse": [ { "key": "OBS_KEY_MOUSE2" } ]}'
-    json_s = key_1 + key_2
-    default_hotkeys = [
-        dot(id="htk_1_mouse", des="LMB state", callback=HTK_1_CB),
-        dot(id="htk_2_mouse", des="RMB state", callback=HTK_2_CB),
-    ]
-    settings = S.obs_data_create_from_json(json_s)
-    for k in default_hotkeys:
-        a = S.obs_data_get_array(settings, k.id)
-        h = S.obs_hotkey_register_frontend(k.id, k.des, k.callback)
-        S.obs_hotkey_load(h, a)
-        S.obs_data_array_release(a)
-    S.obs_data_release(settings)
-    G.MOUSE_HOOKED = True
-
-
 def apply_scale(x, y, width, height):
     width = round(width * x)
     height = round(height * y)
@@ -131,6 +99,43 @@ def apply_scale(x, y, width, height):
 def lerp(minVal, maxVal, k):
     val = minVal + ((maxVal - minVal) * k)
     return val
+
+
+class Hotkey:
+    def __init__(self, callback, obs_settings, _id):
+        self.obs_data = obs_settings
+        self.hotkey_id = S.OBS_INVALID_HOTKEY_ID
+        self.hotkey_saved_key = None
+        self.callback = callback
+        self._id = _id
+
+        self.load_hotkey()
+        self.register_hotkey()
+        self.save_hotkey()
+
+    def register_hotkey(self):
+        description = "Htk " + str(self._id)
+        self.hotkey_id = S.obs_hotkey_register_frontend(
+            "htk_id" + str(self._id), description, self.callback
+        )
+        S.obs_hotkey_load(self.hotkey_id, self.hotkey_saved_key)
+
+    def load_hotkey(self):
+        self.hotkey_saved_key = S.obs_data_get_array(
+            self.obs_data, "htk_id" + str(self._id)
+        )
+        S.obs_data_array_release(self.hotkey_saved_key)
+
+    def save_hotkey(self):
+        self.hotkey_saved_key = S.obs_hotkey_save(self.hotkey_id)
+        S.obs_data_set_array(
+            self.obs_data, "htk_id" + str(self._id), self.hotkey_saved_key
+        )
+        S.obs_data_array_release(self.hotkey_saved_key)
+
+
+class HotkeyDataHolder:
+    htk_copy = None  # this attribute will hold instance of Hotkey
 
 
 class CursorAsSource:
@@ -228,8 +233,9 @@ class CursorAsSource:
             S.remove_current_callback()
 
 
+HOTKEY_DATA_HOLDER = HotkeyDataHolder()
 PY_CURSOR = CursorAsSource()
-hook_mouse_buttons()
+HOTKEY_TOGGLE_ITERATOR = cycle([True, False])
 ###############               ###############               ###############
 
 
@@ -243,6 +249,25 @@ def start_pressed(props, prop):
         S.timer_add(PY_CURSOR.ticker, PY_CURSOR.refresh_rate)
     PY_CURSOR.lock = True
     PY_CURSOR.flag = False  # to keep only one timer callback
+
+
+def callback_on_off(pressed):
+    if pressed:
+        a = b = "undefined"
+        if next(HOTKEY_TOGGLE_ITERATOR):
+            start_pressed(a, b)
+        else:
+            stop_pressed(a, b)
+
+
+def script_load(settings):
+    HOTKEY_DATA_HOLDER.htk_copy = Hotkey(
+        callback_on_off, settings, "On/Off cursor skin"
+    )
+
+
+def script_save(settings):
+    HOTKEY_DATA_HOLDER.htk_copy.save_hotkey()
 
 
 def react_property(props, prop, settings):
@@ -347,9 +372,11 @@ description = """
 <h3 style="color:orange">Authors</h3>
 <a href="https://github.com/upgradeQ"> upgradeQ </a> <br>
 <a href="https://github.com/3_4_700"> 34700 </a>
-""".format(**locals())
+""".format(
+    **locals()
+)
 
 
 def script_description():
-    print(description,"Released under MIT license")
+    print(description, "Released under MIT license")
     return description
