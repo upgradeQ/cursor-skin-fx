@@ -5,7 +5,7 @@ from pynput.mouse import (
     Controller,
 )  # There mighbt be an import error try run this command: python -m pip install pynput
 
-__version__ = "2.2.0"
+__version__ = "2.3.0"
 c = Controller()
 get_position = lambda: c.position
 
@@ -17,18 +17,6 @@ def source_auto_release(source_name):
         yield source
     finally:
         S.obs_source_release(source)
-
-
-@contextmanager
-def data_ar(source_settings=None):
-    if source_settings is not None:
-        settings = S.obs_data_create()
-    else:
-        settings = S.obs_source_get_settings(source_settings)
-    try:
-        yield settings
-    finally:
-        S.obs_data_release(settings)
 
 
 @contextmanager
@@ -140,6 +128,7 @@ class HotkeyDataHolder:
 
 class CursorAsSource:
     source_name = None
+    nested_name = None
     target_name = None
     browser_source_name = None
     lock = True
@@ -154,7 +143,6 @@ class CursorAsSource:
         """pixel to pixel precision"""
         ctx = ExitStack().enter_context
         source = ctx(source_auto_release(self.source_name))
-        settings = ctx(data_ar())
         if source is not None:
             scene_width = S.obs_source_get_width(source)
             scene_height = S.obs_source_get_height(source)
@@ -178,7 +166,6 @@ class CursorAsSource:
         """lerp with scale precision(hide parts of window)"""
         ctx = ExitStack().enter_context
         source = ctx(source_auto_release(self.source_name))
-        settings = ctx(data_ar())
         if source is not None:
             scene_width = S.obs_source_get_width(source)
             scene_height = S.obs_source_get_height(source)
@@ -212,6 +199,29 @@ class CursorAsSource:
                 next_pos.y = lerp(0, target_y, ratio_y)
                 S.obs_sceneitem_set_pos(scene_item, next_pos)
 
+    def update_cursor_on_scene3(self):
+        """update cursor in nested scene"""
+        ctx = ExitStack().enter_context
+        source = ctx(source_auto_release(self.source_name))
+        if source is not None:
+            scene_width = S.obs_source_get_width(source)
+            scene_height = S.obs_source_get_height(source)
+
+            scene_source = S.obs_get_source_by_name(self.nested_name)
+            scene = ctx(scene_from_source_ar(scene_source))
+            scene_item = S.obs_scene_find_source_recursive(scene, self.source_name)
+            if scene_item:
+                scale = S.vec2()
+                S.obs_sceneitem_get_scale(scene_item, scale)
+                scene_width, scene_height = apply_scale(
+                    scale.x, scale.y, scene_width, scene_height
+                )
+                next_pos = S.vec2()
+                next_pos.x, next_pos.y = get_position()
+                next_pos.x -= self.offset_x
+                next_pos.y -= self.offset_y
+                S.obs_sceneitem_set_pos(scene_item, next_pos)
+
     def update_cursor_on_scene(self):
         if not self.use_lerp:
             self.update_cursor_on_scene1()
@@ -227,6 +237,9 @@ class CursorAsSource:
         if self.lock:
             if self.is_update_browser:
                 self.update_cursor_inside_browser_source()
+                return
+            if self.is_update_nested:
+                self.update_cursor_on_scene3()
                 return
             self.update_cursor_on_scene()
         else:
@@ -290,6 +303,7 @@ def script_defaults(settings):
 
 def script_update(settings):
     PY_CURSOR.source_name = S.obs_data_get_string(settings, "source")
+    PY_CURSOR.nested_name = S.obs_data_get_string(settings, "nested")
     PY_CURSOR.target_name = S.obs_data_get_string(settings, "target")
     PY_CURSOR.refresh_rate = S.obs_data_get_int(settings, "_refresh_rate")
     PY_CURSOR.offset_x = S.obs_data_get_int(settings, "_offset_x")
@@ -299,6 +313,7 @@ def script_update(settings):
     PY_CURSOR.height = S.obs_data_get_int(settings, "_height")
     PY_CURSOR.browser_source_name = S.obs_data_get_string(settings, "browser")
     PY_CURSOR.is_update_browser = S.obs_data_get_bool(settings, "_is_update_browser")
+    PY_CURSOR.is_update_nested = S.obs_data_get_bool(settings, "_is_update_nested")
     PY_CURSOR.use_lerp = S.obs_data_get_bool(settings, "_use_lerp")
 
 
@@ -314,6 +329,16 @@ def script_properties():
         props,
         "source",
         "Select cursor source",
+        S.OBS_COMBO_TYPE_EDITABLE,
+        S.OBS_COMBO_FORMAT_STRING,
+    )
+    bool3 = S.obs_properties_add_bool(
+        props, "_is_update_nested", "Use nested scene source"
+    )
+    p4 = S.obs_properties_add_list(
+        props,
+        "nested",
+        "Select nested scene source",
         S.OBS_COMBO_TYPE_EDITABLE,
         S.OBS_COMBO_FORMAT_STRING,
     )
@@ -361,6 +386,12 @@ def script_properties():
                 S.obs_property_list_add_string(p3, name, name)
 
         S.source_list_release(sources)
+    scenes = S.obs_frontend_get_scenes()
+    for n in scenes:
+        source_id = S.obs_source_get_unversioned_id(n)
+        name = S.obs_source_get_name(n)
+        S.obs_property_list_add_string(p4, name, name)
+    S.source_list_release(scenes)
     S.obs_properties_add_button(props, "button", "Stop", stop_pressed)
     S.obs_properties_add_button(props, "button2", "Start", start_pressed)
     return props
