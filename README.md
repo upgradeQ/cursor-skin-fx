@@ -5,9 +5,10 @@ Using [`obs_sceneitem_set_pos`](https://obsproject.com/docs/reference-scenes.htm
 - Install pynput package from [pypi](https://pypi.org/project/pynput/) 
 - Make sure your OBS Studio supports [scripting](https://obsproject.com/docs/scripting.html)
 `python -m pip install pynput`
+- `cursor_shader.lua` - Standalone shader based Windows only alternative to python version.
 # Limitations
 - Multiple monitors setup will not work .
-- If used in fullscreen apps, offset will appear.
+- If used in fullscreen apps, offset might appear.
 # Usage
 - Create a _source_ with desired cursor(e.g Image source or Media source).
 - In scripts select _that_ source name.
@@ -51,13 +52,13 @@ They all have some level of transparency.
 ![Imgur](https://i.imgur.com/s3jvZP5.png) 
 
 # On the Roadmap
-- Lua based shaders rendering (on mouse up, down, trail, etc...)
-- Custom web pages 
-- Visual indicator of mouse up/down state.
+- Lua based shaders rendering (trails, new shaders)
+- GNU/Linux support
 
 # Acknowledgments
-- [`3_4_700`](https://github.com/34700) added offsets functionality for precise custom cursor(like a hand drawn arm holding a pen for artists)
+- [`3_4_700`](https://github.com/34700) - added offsets functionality for precise custom cursor(like a hand drawn arm holding a pen for artists)
 - [`tholman/cursor-effects`](https://github.com/tholman/cursor-effects) - stock cursor trails
+- [`inspirnathan`](https://github.com/inspirnathan) - SDF shaders implementation tutorial [series](https://inspirnathan.com/posts/53-shadertoy-tutorial-part-7/)
 
 # Contribute
 You are welcome to contribute. Help is needed.
@@ -68,8 +69,8 @@ After forking a repository, you can send the original author a [pull request](ht
 ## Marketing 
 Write articles, reviews or tell your friends about it. The more users we have, the more people we have testing and the better we can become.
 ## Design 
-Come up with some new good skins or interactive web skins, and add them.
+Come up with some new good skins or interactive web skins, Lua shaders, and add them.
 ## Voting
 In order to improve this scripting functionality and integrate it into OBS Studio, you are encouraged to vote for this feature:
 https://ideas.obsproject.com/posts/71/option-to-highlight-mouse-cursor-and-mouse-clicks
-Currently the program lacks a way to get the position of the cursor in the texture and is not available in the OBS Studio shader language. 
+Currently the program lacks a way to get the position of the cursor in the texture(includes cursor wait, text, states) and is not available in the OBS Studio shader language. 
