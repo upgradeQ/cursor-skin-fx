@@ -5,9 +5,9 @@ Using [`obs_sceneitem_set_pos`](https://obsproject.com/docs/reference-scenes.htm
 - Install pynput package from [pypi](https://pypi.org/project/pynput/) 
 - Make sure your OBS Studio supports [scripting](https://obsproject.com/docs/scripting.html)
 `python -m pip install pynput`
-- `cursor_shader.lua` - Standalone shader based Windows only alternative to python version.
+- `cursor_shader.lua` - Standalone shader based Windows only 3D cursor skin.
 # Limitations
-- Multiple monitors setup will not work .
+- Multiple monitors setup currently not working .
 - If used in fullscreen apps, offset might appear.
 # Usage
 - Create a _source_ with desired cursor(e.g Image source or Media source).
@@ -53,7 +53,8 @@ They all have some level of transparency.
 
 # On the Roadmap
 - Lua based shaders rendering (trails, new shaders)
-- GNU/Linux support
+- GNU/Linux support (porting HLSL shaders)
+- [`Multi monitors setup`](https://github.com/upgradeQ/OBS-Studio-Cursor-skin/issues/9)
 
 # Acknowledgments
 - [`3_4_700`](https://github.com/34700) - added offsets functionality for precise custom cursor(like a hand drawn arm holding a pen for artists)
