@@ -1,11 +1,29 @@
 # OBS Studio Cursor skin
-Selected source will  follow mouse pointer.
-Using [`obs_sceneitem_set_pos`](https://obsproject.com/docs/reference-scenes.html#c.obs_sceneitem_set_pos) 
+This script pack adds various cursors to be rendered inside OBS Studio.
+There are two main variations of scripts. The Python version uses common API's and requires installation of 3-rd party
+pip packages, this version is crossplatform. The Lua version uses shaders and is not crossplatform, currently Windows only.
+
+# Lua and HLSL shaders cursor
+## Installation 
+Move files to some permanent location, select and add .lua files to OBS Studio.
+Add a filter to a source e.g Desktop Capture.
+
+## Preview 1440p resolution in fullscreen game.
+
+- Neon shape - you can customize color and size.
+
+![img](https://i.imgur.com/KPWO3id.png)
+
+- 3D magic stick - as is.
+
+![img](https://i.imgur.com/kZEfxkd.png)
+
+# Python version
+
 # Installation 
 - Install pynput package from [pypi](https://pypi.org/project/pynput/) 
 - Make sure your OBS Studio supports [scripting](https://obsproject.com/docs/scripting.html)
 `python -m pip install pynput`
-- `cursor_shader.lua` - Standalone shader based Windows only 3D cursor skin.
 # Limitations
 - Multiple monitors setup currently not working .
 - If used in fullscreen apps, offset might appear.
@@ -60,6 +78,7 @@ They all have some level of transparency.
 - [`3_4_700`](https://github.com/34700) - added offsets functionality for precise custom cursor(like a hand drawn arm holding a pen for artists)
 - [`tholman/cursor-effects`](https://github.com/tholman/cursor-effects) - stock cursor trails
 - [`inspirnathan`](https://github.com/inspirnathan) - SDF shaders implementation tutorial [series](https://inspirnathan.com/posts/53-shadertoy-tutorial-part-7/)
+- [`bfxdev/OBS`](https://github.com/bfxdev/OBS) - Shader tutorials and code specific for OBS Studio.
 
 # Contribute
 You are welcome to contribute. Help is needed.
