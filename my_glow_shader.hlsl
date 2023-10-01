@@ -41,27 +41,6 @@ VertDataOut VSDefault(VertDataIn v_in)
     return vert_out;
 }
 
-float3 sdCircle(float2 uv, float r, float2 offset) {
-
-  float x = uv.x - offset.x,
-        y = uv.y - offset.y;
-  return length(float2(x,y)) - r;
-}
-
-float2 toPolar(float2 cartesian){
-    float cdistance = length(cartesian);
-    float angle = atan2(cartesian.y, cartesian.x);
-    return float2(angle / 3.14159265, cdistance);
-}
-
-float2 rotate(float2 samplePosition, float rotation){
-    const float PI = 3.14159;
-    float angle = rotation * PI * 2 * -1;
-    float sine, cosine;
-    sincos(angle, sine, cosine);
-    return float2(cosine * samplePosition.x + sine * samplePosition.y, cosine * samplePosition.y - sine * samplePosition.x);
-}
-
 float sdBox(float2 p, float2 b )
 {
     float2 d = abs(p)-b;
@@ -100,12 +79,9 @@ float opOnionTri(float2 p,float r, float cr)
   return abs(sdEquilateralTriangle(p,cr)) - r;
 }
 
-float3 drawScene2(float2 uv,float4 bg) {
-  float3 outer_col = float3(r1,g1,b1);
-  float3 inner_col = float3(r2,g2,b2);
+float drawScene2(float2 uv) {
   float cr = rsize;
   float res;
-  float2 uv2 = toPolar(uv);
 
   if (idsd>0.0) {
     res = sdEquilateralTriangle(uv,cr);
@@ -123,25 +99,25 @@ float3 drawScene2(float2 uv,float4 bg) {
   }
 
   res = smoothstep(0.,cr*0.4,res);
-  float inner_blur = smoothstep(0.0,0.06,2.0 * abs(res));
-  outer_col = lerp(inner_col, outer_col, inner_blur);
-  outer_col = lerp(outer_col,bg.rgb,res);
-  return outer_col;
-
+  return res;
 }
 
 float4 PassThrough(VertDataOut v_in) : TARGET
 {
-   float2 uv = v_in.uv;
-   float4 orig = image.Sample(textureSampler, uv);
-   uv -= 0.5;
-   float2 mousePos = float2(mouse_x,mouse_y);
-   uv -= mousePos - 0.5;
-   float aspect_ratio = float(width)/float(height);
-   uv.x *= aspect_ratio;
-   //uv =rotate(uv,toPolar(mousePos).y-itime*.25);
-   float3 col = drawScene2(uv,orig);
-   return float4(col,1.0);
+  float3 outer_col = float3(r1,g1,b1);
+  float3 inner_col = float3(r2,g2,b2);
+  float2 uv = v_in.uv;
+  float4 orig = image.Sample(textureSampler, uv);
+  uv -= 0.5;
+  float2 mousePos = float2(mouse_x,mouse_y);
+  uv -= mousePos - 0.5;
+  float aspect_ratio = float(width)/float(height);
+  uv.x *= aspect_ratio;
+  float res = drawScene2(uv);
+  float inner_blur = smoothstep(0.0,0.06,2.0 * abs(res));
+  outer_col = saturate(lerp(inner_col, outer_col, inner_blur));
+  outer_col = lerp(outer_col,orig.rgb,res);
+  return float4(outer_col,1.0);
 }
 
 technique Draw
