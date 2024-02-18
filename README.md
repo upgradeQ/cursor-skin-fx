@@ -14,9 +14,11 @@ Add a filter to a source e.g Desktop Capture.
 
 ![img](https://i.imgur.com/KPWO3id.png)
 
-- 3D magic stick - as is.
+- On click shader  - show up to 7 clicks at the same time and show/hide highlight
 
-![img](https://i.imgur.com/kZEfxkd.png)
+- Shader trail - simple circles trail 
+
+- Shader trail xmas - holiday special 
 
 # Python version
 
@@ -71,6 +73,7 @@ They all have some level of transparency.
 
 # On the Roadmap
 - Lua based shaders rendering (trails, new shaders)
+- [Flipbook](https://godotshaders.com/snippet/flipbook/) animations support
 - GNU/Linux support (porting HLSL shaders)
 - [`Multi monitors setup`](https://github.com/upgradeQ/OBS-Studio-Cursor-skin/issues/9)
 
