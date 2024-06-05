@@ -1,14 +1,15 @@
 # OBS Studio Cursor skin
-This script pack adds various cursors to be rendered inside OBS Studio.
-There are two main variations of scripts. The Python version uses common API's and requires installation of 3-rd party
-pip packages, this version is crossplatform. The Lua version uses shaders and is not crossplatform, currently Windows only.
+This script adds a pack of various cursors for OBS Studio.
+There are two main variations of the script. The Python version requires installation of 3-rd party
+pip packages and is crossplatform. The Lua version uses multiple scripts + shaders, Windows (DirectX) only.
 
 # Lua and HLSL shaders cursor
 ## Installation 
-Move files to some permanent location, select and add .lua files to OBS Studio.
-Add a filter to a source e.g Desktop Capture.
+Move files to some permanent location, select and add .lua files to OBS Studio, you will see new entries in context menu of filters or sources.
+Add a filter to a source e.g Desktop Capture if it is a filter based cursor. 
+Add a source to scene if it is a new source type cursor. 
 
-## Preview 1440p resolution in fullscreen game.
+## Sample preview 1440p resolution in fullscreen game.
 
 - Neon shape - you can customize color and size.
 
@@ -18,7 +19,9 @@ Add a filter to a source e.g Desktop Capture.
 
 - Shader trail - simple circles trail 
 
-- Shader trail xmas - holiday special 
+- Shader trail xmas - holiday special (high GPU usage!)
+
+- Raster particles - A new source with 10k stateful unsorted particles, originally developed for a max 2560x1440 resolution, but works on 16:9. 
 
 # Python version
 
@@ -27,7 +30,7 @@ Add a filter to a source e.g Desktop Capture.
 - Make sure your OBS Studio supports [scripting](https://obsproject.com/docs/scripting.html)
 `python -m pip install pynput`
 # Limitations
-- Multiple monitors setup currently not working .
+- Multiple monitors setup currently not working.
 - If used in fullscreen apps, offset might appear.
 # Usage
 - Create a _source_ with desired cursor(e.g Image source or Media source).
@@ -62,19 +65,10 @@ Add a filter to a source e.g Desktop Capture.
 
 See: [Zoom and Follow](https://obsproject.com/forum/resources/zoom-and-follow.1051/) , [source code ](https://github.com/tryptech/obs-zoom-and-follow)
 
-# Example cursors
-They all have some level of transparency.
-- yellow circle 
-![img](https://i.imgur.com/ruzF9HN.png)
-- red circle 
-![img](https://i.imgur.com/8qoRU3i.png)
-- green circle
-![Imgur](https://i.imgur.com/s3jvZP5.png) 
-
 # On the Roadmap
-- Lua based shaders rendering (trails, new shaders)
+- Lua based shaders rendering: proper trail rendering, new particles effects
 - [Flipbook](https://godotshaders.com/snippet/flipbook/) animations support
-- GNU/Linux support (porting HLSL shaders)
+- GNU/Linux support : porting HLSL shaders to OpenGL
 - [`Multi monitors setup`](https://github.com/upgradeQ/OBS-Studio-Cursor-skin/issues/9)
 
 # Acknowledgments
@@ -82,18 +76,15 @@ They all have some level of transparency.
 - [`tholman/cursor-effects`](https://github.com/tholman/cursor-effects) - stock cursor trails
 - [`inspirnathan`](https://github.com/inspirnathan) - SDF shaders implementation tutorial [series](https://inspirnathan.com/posts/53-shadertoy-tutorial-part-7/)
 - [`bfxdev/OBS`](https://github.com/bfxdev/OBS) - Shader tutorials and code specific for OBS Studio.
+- [`DirectX VTF (2008)`](https://web.archive.org/web/20130225054030/http://www.catalinzima.com/tutorials/4-uses-of-vtf/particle-systems/)
 
 # Contribute
 You are welcome to contribute. Help is needed.
 ## Developing
 There are roadmap items to choose, you are also free to suggest ideas to add and implement. There are forums and GitHub Issues check them out for suggestions or bug reports.
  [Forks](https://help.github.com/articles/fork-a-repo) are a great way to contribute to a repository.
-After forking a repository, you can send the original author a [pull request](https://help.github.com/articles/using-pull-requests)
+After forking a repository, you can send the original author a [pull request](https://help.github.com/articles/using-pull-requests) . Create a new file for each of your source/filter.
 ## Marketing 
 Write articles, reviews or tell your friends about it. The more users we have, the more people we have testing and the better we can become.
-## Design 
-Come up with some new good skins or interactive web skins, Lua shaders, and add them.
 ## Voting
-In order to improve this scripting functionality and integrate it into OBS Studio, you are encouraged to vote for this feature:
-https://ideas.obsproject.com/posts/71/option-to-highlight-mouse-cursor-and-mouse-clicks
-Currently the program lacks a way to get the position of the cursor in the texture(includes cursor wait, text, states) and is not available in the OBS Studio shader language. 
+In order to improve this scripting functionality and integrate it into OBS Studio, you are encouraged to vote for this feature: https://ideas.obsproject.com/posts/71/option-to-highlight-mouse-cursor-and-mouse-clicks Currently the program lacks a way to get the cursor texture(includes cursor wait, text, states).
