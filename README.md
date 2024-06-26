@@ -23,6 +23,8 @@ Add a source to scene if it is a new source type cursor.
 
 - Raster particles - A new source with 10k stateful unsorted particles, originally developed for a max 2560x1440 resolution, but works on 16:9. 
 
+- Mouse cursor motion blur - A new source adds 360fps like motion blur cursor. Locked to 60fps - do not preview it or create another instance.
+
 # Python version
 
 # Installation 
@@ -76,7 +78,7 @@ See: [Zoom and Follow](https://obsproject.com/forum/resources/zoom-and-follow.10
 - [`tholman/cursor-effects`](https://github.com/tholman/cursor-effects) - stock cursor trails
 - [`inspirnathan`](https://github.com/inspirnathan) - SDF shaders implementation tutorial [series](https://inspirnathan.com/posts/53-shadertoy-tutorial-part-7/)
 - [`bfxdev/OBS`](https://github.com/bfxdev/OBS) - Shader tutorials and code specific for OBS Studio.
-- [`DirectX VTF (2008)`](https://web.archive.org/web/20130225054030/http://www.catalinzima.com/tutorials/4-uses-of-vtf/particle-systems/)
+- [`DirectX VTF (2008)`](https://web.archive.org/web/20130225054030/http://www.catalinzima.com/tutorials/4-uses-of-vtf/particle-systems/) - particle system from VTF
 
 # Contribute
 You are welcome to contribute. Help is needed.
