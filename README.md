@@ -23,7 +23,7 @@ Add a source to scene if it is a new source type cursor.
 
 - Raster particles - A new source with 10k stateful unsorted particles, originally developed for a max 2560x1440 resolution, but works on 16:9. 
 
-- Mouse cursor motion blur - A new source adds 360fps like motion blur cursor. Locked to 60fps - do not preview it or create another instance.
+- Mouse cursor motion blur - A new source, adds 360fps like motion blur cursor. Locked to 60fps
 
 # Python version
 

@@ -426,9 +426,15 @@ function set_params(ctx)
   S.gs_effect_set_float(ctx.params.height, ctx.height)
 end
 
+function SourceDef:video_tick(seconds)
+  if (seconds > 0.013) then 
+    read_from_pipe_sync()
+    parse_string(data)
+  end
+  self.current_time = self.current_time + seconds
+end
+
 function SourceDef:video_render()
-  read_from_pipe_sync()
-  parse_string(data)
   set_params(self)
   while S.gs_effect_loop(self.effect, "Draw") do
     S.gs_draw_sprite(nil, 0, self.width, self.height)
@@ -456,10 +462,6 @@ end
 function SourceDef:get_defaults()
   S.obs_data_set_default_double(self, "_w", 1920)
   S.obs_data_set_default_double(self, "_h", 1080)
-end
-
-function SourceDef:video_tick(seconds)
-  self.current_time = self.current_time + seconds
 end
 
 function script_load(settings)
