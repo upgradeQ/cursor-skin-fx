@@ -234,7 +234,7 @@ local ffi = require("ffi")
 local tonumber, setmetatable = tonumber, setmetatable
 local C, fnew, cast = ffi.C, ffi.new, ffi.cast
 
-ffi.cdef(]===] .."[[" .. common_lua_h .. "]]" ..[===[)
+ffi.cdef(]===] .."[[" .. common_lua_h .. "]]" .. [===[)
 
 local function thread_main(child_main)
   return tonumber(cast("intptr_t", cast("void *(*)(void *)", child_main)))
@@ -260,7 +260,7 @@ local function create_named_pipe(pipeName)
   return hPipe
 end
 
-local function connectNamedPipe(hPipe)
+local function connect_named_pipe(hPipe)
   local overlapped = fnew("OVERLAPPED")
   overlapped.hEvent = C.CreateEventA(nil, true, false, nil)
   if not C.ConnectNamedPipe(hPipe, nil) then
@@ -277,29 +277,28 @@ end
 
 local mouse_pos = fnew("Point")
 local mouse_coords = ''
-local total = 16.00 - 0.03
+local total = 16.00
 local points = 6
 local step = total/points
 
 local function calc_mouse()
   for i=1, points do
     C.GetCursorPos(mouse_pos)
-    mouse_coords = mouse_coords .. mouse_pos.x .. '.' .. mouse_pos.y .. ';'
-    C.Sleep(step)
+    mouse_coords = mouse_coords .. mouse_pos.x .. ';' .. mouse_pos.y .. ' '
+    if not (i == points) then C.Sleep(step) else C.Sleep(step*.3) end
   end
 end
 
 local function main()
   local hPipe = ffi.gc(create_named_pipe(p_name), C.CloseHandle)
-  local response = ""
   local buflen = fnew("unsigned long[1]", 1)
   local n = 1
   if hPipe then
-    if connectNamedPipe(hPipe) then
+    if connect_named_pipe(hPipe) then
       --C.Beep(1000, 300)
       while true do
         calc_mouse()
-        C.WriteFile(hPipe, response .. mouse_coords, string.len(response .. mouse_coords), buflen, nil)
+        C.WriteFile(hPipe, mouse_coords, string.len(mouse_coords), buflen, nil)
         mouse_coords = ''
         C.FlushFileBuffers(hPipe)
       end
@@ -310,7 +309,7 @@ end
 return thread.main(main)
 ]===]
 
-local thr = assert(thread_new(g_lua_string))
+local THREAD;
 local init = false
 local hPipe;
 
@@ -328,19 +327,15 @@ function init1()
   init = true
 end
 
-local buffer = fnew("char[4096]")
+local buffer = fnew("char[1024]")
 local bytes_read = fnew("unsigned long[1]")
 local data = ''
 
 function read_from_pipe_sync()
   if not init then init1() end
-  local success = C.ReadFile(hPipe, buffer, 4096, bytes_read, nil)
+  local success = C.ReadFile(hPipe, buffer, 1024, bytes_read, nil)
   data = ffi.string(buffer, bytes_read[0])
   --print('[+]' .. data .. '[+]')
-end
-
-function script_unload()
-  thr:join()
 end
 
 local SourceDef = {}
@@ -385,6 +380,7 @@ function SourceDef:create(source)
   end
 
   SourceDef.update(instance, self)
+  THREAD = assert(thread_new(g_lua_string))
   return instance
 end
 
@@ -393,20 +389,21 @@ function SourceDef:destroy()
     S.obs_enter_graphics()
     S.gs_effect_destroy(self.effect)
     S.obs_leave_graphics()
+    THREAD:join()
   end
 end
 
 function parse_string(input_data)
   local coords_pairs = {}
-  for coord in string.gmatch(input_data, "%d+%.%d+") do
+  for coord in string.gmatch(input_data, "%d+%;%d+") do
     table.insert(coords_pairs, coord)
   end
-  x1, y1 = coords_pairs[1]:match("(%d+).(%d+)")
-  x2, y2 = coords_pairs[2]:match("(%d+).(%d+)")
-  x3, y3 = coords_pairs[3]:match("(%d+).(%d+)")
-  x4, y4 = coords_pairs[4]:match("(%d+).(%d+)")
-  x5, y5 = coords_pairs[5]:match("(%d+).(%d+)")
-  x6, y6 = coords_pairs[6]:match("(%d+).(%d+)")
+  x1, y1 = coords_pairs[1]:match("(%d+)%;(%d+)")
+  x2, y2 = coords_pairs[2]:match("(%d+)%;(%d+)")
+  x3, y3 = coords_pairs[3]:match("(%d+)%;(%d+)")
+  x4, y4 = coords_pairs[4]:match("(%d+)%;(%d+)")
+  x5, y5 = coords_pairs[5]:match("(%d+)%;(%d+)")
+  x6, y6 = coords_pairs[6]:match("(%d+)%;(%d+)")
 end
 
 function set_params(ctx)
@@ -427,7 +424,7 @@ function set_params(ctx)
 end
 
 function SourceDef:video_tick(seconds)
-  if (seconds > 0.013) then 
+  if (seconds > 0.016) then 
     read_from_pipe_sync()
     parse_string(data)
   end
@@ -527,7 +524,7 @@ float4 set_cursor(float2 p, float2 uv) {
   p.x *= width/height;
   p = float2(p.x/width, p.y/height);
   float d = sdCircle(p-uv, 0.007);
-  d = 1-smoothstep(0, 0.007, d);
+  d = 1-smoothstep(0.0, 0.007, d);
   return float4(1.0, 1.0, 0.0, d);
 
 }
@@ -542,7 +539,8 @@ float4 PassThrough(VertDataOut v_in) : TARGET
    basic += set_cursor(particle4, uv) /2;
    basic += set_cursor(particle5, uv) /2;
    basic += set_cursor(particle6, uv) /2;
-   return basic/2;
+   basic /= 2;
+   return basic;
 }
 technique Draw
 {
