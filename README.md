@@ -1,4 +1,4 @@
-# OBS Studio Cursor skin
+# cursor skin fx 
 This script adds a pack of various cursors for OBS Studio.
 There are two main variations of the script. The Python version requires installation of 3-rd party
 pip packages and is crossplatform. The Lua version uses multiple scripts + shaders, Windows (DirectX) only.
