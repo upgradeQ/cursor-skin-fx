@@ -6,9 +6,7 @@ local C, fnew, cast = ffi.C, ffi.new, ffi.cast
 S = obslua
 obs = S
 
-local common_lua_h =
-
-[=[
+local common_lua_h = [=[
 static const int WAIT_ABANDONED_TH = 0x00000080;
 static const int WAIT_OBJECT_0_TH = 0x00000000;
 static const int WAIT_TIMEOUT_TH = 0x00000102;
@@ -150,14 +148,21 @@ ffi.cdef(common_lua_h)
 local function error_win(lvl)
   local errcode = C.GetLastError()
   local str = fnew("wchar_t[?]", 1024)
-  local numout = C.FormatMessageW(bit.bor(C.FORMAT_MESSAGE_FROM_SYSTEM,
-    C.FORMAT_MESSAGE_IGNORE_INSERTS), nil, errcode, 0, str, 1024, nil)
+  local numout = C.FormatMessageW(
+    bit.bor(C.FORMAT_MESSAGE_FROM_SYSTEM, C.FORMAT_MESSAGE_IGNORE_INSERTS),
+    nil,
+    errcode,
+    0,
+    str,
+    1024,
+    nil
+  )
   if numout == 0 then
     error("Windows Error: (Error calling FormatMessage)", lvl)
   else
     local utf8_str = fnew("char[?]", numout * 4)
     local bytes_written = C.WideCharToMultiByte(65001, 0, str, numout, utf8_str, numout * 4, nil, nil)
-    error("Windows Error: "..ffi.string(utf8_str, bytes_written), lvl)
+    error("Windows Error: " .. ffi.string(utf8_str, bytes_written), lvl)
   end
 end
 
@@ -168,18 +173,22 @@ local function error_check(result)
 end
 
 local function thread_join(thr)
-  if thr.thread == nil then error("invalid thread", 3) end
+  if thr.thread == nil then
+    error("invalid thread", 3)
+  end
   local timeout_ms = 0.01
   if timeout_ms then
-    timeout_ms = timeout_ms*1000
+    timeout_ms = timeout_ms * 1000
   else
     timeout_ms = C.INFINITE_TH
   end
   local r = C.WaitForSingleObject(thr.thread, timeout_ms)
   if r == C.WAIT_OBJECT_0_TH or r == C.WAIT_ABANDONED_TH then
-    local result = fnew"unsigned long[1]"
+    local result = fnew("unsigned long[1]")
     local ret = C.GetExitCodeThread(thr.thread, result)
-    if ret==0 then error_win(2) end
+    if ret == 0 then
+      error_win(2)
+    end
     return true, result[0]
   elseif r == C.WAIT_TIMEOUT_TH then
     return false
@@ -192,7 +201,7 @@ end
 local thread_mt = {
   __index = {
     join = thread_join,
-  }
+  },
 }
 
 -- https://www.freelists.org/post/luajit/A-new-lua-state-in-a-new-thread-from-luajit,3
@@ -212,7 +221,7 @@ local function thread_new(g_lua_string)
         C.lua_settop(L, 0)
         thr.tid = fnew("DWORD[1]")
         thr.thread = C.CreateThread(nil, 0, start, arg_c, flags, thr.tid)
-        if  thr.thread then
+        if thr.thread then
           return thr
         else
           err = "failed to create child thread"
@@ -234,7 +243,7 @@ local ffi = require("ffi")
 local tonumber, setmetatable = tonumber, setmetatable
 local C, fnew, cast = ffi.C, ffi.new, ffi.cast
 
-ffi.cdef(]===] .."[[" .. common_lua_h .. "]]" .. [===[)
+ffi.cdef(]===] .. "[[" .. common_lua_h .. "]]" .. [===[)
 
 local function thread_main(child_main)
   return tonumber(cast("intptr_t", cast("void *(*)(void *)", child_main)))
@@ -309,9 +318,9 @@ end
 return thread.main(main)
 ]===]
 
-local THREAD;
+local THREAD
 local init = false
-local hPipe;
+local hPipe
 
 function init1()
   local u_name = "mouse_values_high_freq"
@@ -329,10 +338,12 @@ end
 
 local buffer = fnew("char[1024]")
 local bytes_read = fnew("unsigned long[1]")
-local data = ''
+local data = ""
 
 function read_from_pipe_sync()
-  if not init then init1() end
+  if not init then
+    init1()
+  end
   local success = C.ReadFile(hPipe, buffer, 1024, bytes_read, nil)
   data = ffi.string(buffer, bytes_read[0])
   --print('[+]' .. data .. '[+]')
@@ -360,17 +371,17 @@ function SourceDef:create(source)
   instance.effect = S.gs_effect_create(EFFECT, "mb_cursor", nil)
   x1, x2, x3, x4, x5, x6 = 0, 0, 0, 0, 0, 0
   y1, y2, y3, y4, y5, y6 = 0, 0, 0, 0, 0, 0
-  p1, p2, p3, p4, p5, p6 = S.vec2(), S.vec2(),  S.vec2(),  S.vec2(),  S.vec2(),  S.vec2()
+  p1, p2, p3, p4, p5, p6 = S.vec2(), S.vec2(), S.vec2(), S.vec2(), S.vec2(), S.vec2()
   if instance.effect ~= nil then
-    instance.params.width = S.gs_effect_get_param_by_name(instance.effect, 'width')
-    instance.params.itime = S.gs_effect_get_param_by_name(instance.effect, 'itime')
-    instance.params.height = S.gs_effect_get_param_by_name(instance.effect, 'height')
-    instance.params.particle1 = S.gs_effect_get_param_by_name(instance.effect, 'particle1')
-    instance.params.particle2 = S.gs_effect_get_param_by_name(instance.effect, 'particle2')
-    instance.params.particle3 = S.gs_effect_get_param_by_name(instance.effect, 'particle3')
-    instance.params.particle4 = S.gs_effect_get_param_by_name(instance.effect, 'particle4')
-    instance.params.particle5 = S.gs_effect_get_param_by_name(instance.effect, 'particle5')
-    instance.params.particle6 = S.gs_effect_get_param_by_name(instance.effect, 'particle6')
+    instance.params.width = S.gs_effect_get_param_by_name(instance.effect, "width")
+    instance.params.itime = S.gs_effect_get_param_by_name(instance.effect, "itime")
+    instance.params.height = S.gs_effect_get_param_by_name(instance.effect, "height")
+    instance.params.particle1 = S.gs_effect_get_param_by_name(instance.effect, "particle1")
+    instance.params.particle2 = S.gs_effect_get_param_by_name(instance.effect, "particle2")
+    instance.params.particle3 = S.gs_effect_get_param_by_name(instance.effect, "particle3")
+    instance.params.particle4 = S.gs_effect_get_param_by_name(instance.effect, "particle4")
+    instance.params.particle5 = S.gs_effect_get_param_by_name(instance.effect, "particle5")
+    instance.params.particle6 = S.gs_effect_get_param_by_name(instance.effect, "particle6")
   end
 
   S.obs_leave_graphics()
@@ -424,7 +435,7 @@ function set_params(ctx)
 end
 
 function SourceDef:video_tick(seconds)
-  if (seconds > 0.016) then 
+  if seconds > 0.016 then
     read_from_pipe_sync()
     parse_string(data)
   end
@@ -438,16 +449,21 @@ function SourceDef:video_render()
   end
 end
 
-function SourceDef:get_name() return "Single pass threaded reverse motion blur" end
-function SourceDef:get_width() return self.width end
-function SourceDef:get_height() return self.height end
-
+function SourceDef:get_name()
+  return "[🫨] Motion blur by upgradeQ"
+end
+function SourceDef:get_width()
+  return self.width
+end
+function SourceDef:get_height()
+  return self.height
+end
 
 function SourceDef:get_properties()
   local props = S.obs_properties_create()
   S.obs_properties_add_int(props, "_w", "width", 1, 2560, 1)
   S.obs_properties_add_int(props, "_h", "height", 1, 1440, 1)
-  S.obs_properties_add_button(props, "button", "Single pass threaded reverse motion blur", function() end)
+  S.obs_properties_add_button(props, "button", "[🫨] Motion blur by upgradeQ", function() end)
   return props
 end
 
@@ -462,12 +478,25 @@ function SourceDef:get_defaults()
 end
 
 function script_load(settings)
-  local my_source = SourceDef:new({id='cursor_shader_mb', type=S.OBS_SOURCE_TYPE_SOURCE,
-    output_flags=bit.bor(S.OBS_SOURCE_VIDEO, S.OBS_SOURCE_CUSTOM_DRAW)})
+  local my_source = SourceDef:new({
+    id = "cursor_shader_mb",
+    type = S.OBS_SOURCE_TYPE_SOURCE,
+    output_flags = bit.bor(S.OBS_SOURCE_VIDEO, S.OBS_SOURCE_CUSTOM_DRAW),
+  })
   S.obs_register_source(my_source)
 end
 
-EFFECT = ([[
+function script_description()
+  return [[
+<h2> cursor skin fx  for OBS Studio </h2>
+<a style="color: #0000ff; text-decoration: none; font-size:26px;"
+href="https://www.github.com/upgradeQ/cursor-skin-fx/blob/master/README.md">Visit the repository README.md</a><br/>
+Copyright &copy; 2026 upgradeQ<br/>
+Distributed under <a style="color: #ffffff; text-decoration: none;"> MIT license</a>
+]]
+end
+
+EFFECT = [[
 // OBS-specific syntax adaptation to HLSL standard to avoid errors reported by the code editor
 #define SamplerState sampler_state
 #define Texture2D texture2d
@@ -550,6 +579,4 @@ technique Draw
         pixel_shader  = PassThrough(v_in);
     }
 }
-]])
-
--- vim: ft=lua ts=2 sw=2 et sts=2
+]]

@@ -1,23 +1,25 @@
 S = obslua
 obs = S
-local ffi = require"ffi"
+local ffi = require("ffi")
 local C = ffi.C
-ffi.cdef[[
+ffi.cdef([[
 typedef struct {int x, y;} Point;
 bool GetCursorPos(Point *lpPoint);
-]]
+]])
 
 function try_load_library(alias, name)
-  if ffi.os == "OSX" then name = name .. ".0.dylib" end
+  if ffi.os == "OSX" then
+    name = name .. ".0.dylib"
+  end
   ok, _G[alias] = pcall(ffi.load, name)
-  if not ok then 
+  if not ok then
     print(("WARNING:%s:Has failed to load, %s is nil"):format(name, alias))
   end
 end
 
 try_load_library("obsffi", "obs")
 
-ffi.cdef[[
+ffi.cdef([[
 typedef struct {int x, y;} Point;
 bool GetCursorPos(Point *lpPoint);
 void *bmalloc(size_t size);
@@ -209,17 +211,7 @@ struct d3ddevicecontext {
   struct d3ddevicecontextVTBL** lpVtbl;
 };
 
-]]
-
-local function skip_tick_render(ctx)
-  local target = S.obs_filter_get_target(ctx.source)
-  local width, height;
-  if target == nil then width = 0; height = 0; else
-    width = S.obs_source_get_base_width(target)
-    height = S.obs_source_get_base_height(target)
-  end
-  ctx.width, ctx.height = width , height
-end
+]])
 
 local SourceDef = {}
 
@@ -247,28 +239,31 @@ function SourceDef:create(source)
   instance.mouse_pos = ffi.new("Point")
 
   instance.effect = S.gs_effect_create(EFFECT, "simulation_step", nil)
-  instance.texture_a = S.gs_texrender_create(S.GS_RGBA32F, S.GS_ZS_NONE) 
-  instance.texture_b = S.gs_texrender_create(S.GS_RGBA32F, S.GS_ZS_NONE) 
-  instance.texture_c = S.gs_texrender_create(S.GS_RGBA, S.GS_ZS_NONE) 
+  instance.texture_a = S.gs_texrender_create(S.GS_RGBA32F, S.GS_ZS_NONE)
+  instance.texture_b = S.gs_texrender_create(S.GS_RGBA32F, S.GS_ZS_NONE)
+  instance.texture_c = S.gs_texrender_create(S.GS_RGBA, S.GS_ZS_NONE)
   instance.texture_c_clear = S.vec4()
   instance.clear_flags = bit.bor(S.GS_CLEAR_COLOR)
   instance.current_texrender = instance.texture_a
   instance.tex3 = S.gs_texrender_get_texture(instance.texture_a)
+  instance.tex4 = nil
   instance.pingpong = nil
   instance.num = 0
   instance.effect2 = S.gs_effect_create(EFFECT2, "raster_step", nil)
-  if instance.effect2 == nil then print('failed to compile effect2') end
+  if instance.effect2 == nil then
+    print("failed to compile effect2")
+  end
 
-  instance.params.image2 = S.gs_effect_get_param_by_name(instance.effect2, 'image')
+  instance.params.image2 = S.gs_effect_get_param_by_name(instance.effect2, "image")
   instance.effect3 = S.obs_get_base_effect(S.OBS_EFFECT_DEFAULT)
-  instance.params.image3 = S.gs_effect_get_param_by_name(instance.effect3, 'image')
+  instance.params.image3 = S.gs_effect_get_param_by_name(instance.effect3, "image")
   if instance.effect ~= nil then
-    instance.params.width = S.gs_effect_get_param_by_name(instance.effect, 'width')
-    instance.params.itime = S.gs_effect_get_param_by_name(instance.effect, 'itime')
-    instance.params.height = S.gs_effect_get_param_by_name(instance.effect, 'height')
-    instance.params.mouse_x = S.gs_effect_get_param_by_name(instance.effect, 'mouse_x')
-    instance.params.mouse_y = S.gs_effect_get_param_by_name(instance.effect, 'mouse_y')
-    instance.params.image = S.gs_effect_get_param_by_name(instance.effect, 'image')
+    instance.params.width = S.gs_effect_get_param_by_name(instance.effect, "width")
+    instance.params.itime = S.gs_effect_get_param_by_name(instance.effect, "itime")
+    instance.params.height = S.gs_effect_get_param_by_name(instance.effect, "height")
+    instance.params.mouse_x = S.gs_effect_get_param_by_name(instance.effect, "mouse_x")
+    instance.params.mouse_y = S.gs_effect_get_param_by_name(instance.effect, "mouse_y")
+    instance.params.image = S.gs_effect_get_param_by_name(instance.effect, "image")
   end
 
   instance.params.itime2 = S.gs_effect_get_param_by_name(instance.effect2, "itime")
@@ -280,19 +275,19 @@ function SourceDef:create(source)
 
   local inum = instance.vertex_num
   local indices = ffi.cast("index_t*", obsffi.bmalloc(inum * ffi.sizeof("index_t")))
-  for i =0, inum -1, 6 do
-    indices[i+0] = (i/6)*4 + 0
-    indices[i+1] = (i/6)*4 + 1
-    indices[i+2] = (i/6)*4 + 2
+  for i = 0, inum - 1, 6 do
+    indices[i + 0] = (i / 6) * 4 + 0
+    indices[i + 1] = (i / 6) * 4 + 1
+    indices[i + 2] = (i / 6) * 4 + 2
 
-    indices[i+3] = (i/6)*4 + 2
-    indices[i+4] = (i/6)*4 + 3
-    indices[i+5] = (i/6)*4 + 1
+    indices[i + 3] = (i / 6) * 4 + 2
+    indices[i + 4] = (i / 6) * 4 + 3
+    indices[i + 5] = (i / 6) * 4 + 1
   end
   instance.indexbuffer = obsffi.gs_indexbuffer_create(S.GS_UNSIGNED_LONG, indices, inum, 0)
 
   S.gs_render_start(true)
-  local x, y, r;
+  local x, y, r
   for i = 0, (instance.dt_width * instance.dt_height) - 1 do
     x = math.floor(i / instance.dt_width)
     y = i % instance.dt_width
@@ -308,14 +303,16 @@ function SourceDef:create(source)
 
   instance.pDevice = ffi.cast("struct d3ddevice*", instance.device)
   instance.GetImmediateContext = ffi.cast("long(__stdcall*)(void*, void**)", instance.pDevice.lpVtbl[40])
-  instance.arg1 = ffi.new('unsigned long[1]') 
+  instance.arg1 = ffi.new("unsigned long[1]")
   instance.pContext = ffi.cast("void**", instance.arg1)
   instance.GetImmediateContext(instance.pDevice, instance.pContext)
   instance.pContext2 = ffi.cast("struct d3ddevicecontext*", instance.pContext[0])
   instance.Release_pContext = ffi.cast("unsigned long(__stdcall*)(void*)", instance.pContext2.lpVtbl[2])
   instance.Release_pDevice = ffi.cast("unsigned long(__stdcall*)(void*)", instance.pDevice.lpVtbl[2])
-  instance.VSSetShaderResources = ffi.cast("long(__stdcall*)(void*, unsigned int, unsigned int, void**)", instance.pContext2.lpVtbl[25])
-  instance.PSGetShaderResources = ffi.cast("long(__stdcall*)(void*, unsigned int, unsigned int, void**)", instance.pContext2.lpVtbl[73])
+  instance.VSSetShaderResources =
+    ffi.cast("long(__stdcall*)(void*, unsigned int, unsigned int, void**)", instance.pContext2.lpVtbl[25])
+  instance.PSGetShaderResources =
+    ffi.cast("long(__stdcall*)(void*, unsigned int, unsigned int, void**)", instance.pContext2.lpVtbl[73])
 
   instance.arg2 = ffi.new("unsigned long[1]")
   instance.pRes = ffi.cast("void**", instance.arg2)
@@ -347,16 +344,21 @@ function SourceDef:destroy()
   end
 end
 
-function SourceDef:get_name() return "^🪄 Raster particles cursor by upgradeQ 🪄^" end
-function SourceDef:get_width() return self.width end
-function SourceDef:get_height() return self.height end
-
+function SourceDef:get_name()
+  return "[🪄] Raster particles cursor by upgradeQ"
+end
+function SourceDef:get_width()
+  return self.width
+end
+function SourceDef:get_height()
+  return self.height
+end
 
 function SourceDef:get_properties()
   local props = S.obs_properties_create()
-  S.obs_properties_add_int(props, "_w", "width", 1, 2560, 1)
-  S.obs_properties_add_int(props, "_h", "height", 1, 1440, 1)
-  S.obs_properties_add_button(props, "button", "^🪄 Raster particles cursor by upgradeQ 🪄^", function() end)
+  S.obs_properties_add_int(props, "_w", "width", 1, 25600, 1)
+  S.obs_properties_add_int(props, "_h", "height", 1, 14400, 1)
+  S.obs_properties_add_button(props, "button", "[🪄] Raster particles cursor by upgradeQ", function() end)
   return props
 end
 
@@ -385,7 +387,6 @@ function SourceDef:video_render()
   S.gs_effect_set_int(self.params.height, self.height)
   S.gs_effect_set_texture(self.params.image, self.tex3)
   if S.gs_texrender_begin(self.current_texrender, self.dt_width, self.dt_height) then
-
     while S.gs_effect_loop(self.effect, "Draw") do
       S.gs_ortho(0, self.dt_width, 0, self.dt_height, -100.0, 100.0)
       S.gs_draw_sprite(nil, 0, self.dt_width, self.dt_height)
@@ -394,7 +395,7 @@ function SourceDef:video_render()
   end
 
   self.tex3 = S.gs_texrender_get_texture(self.current_texrender)
-  if (self.made_by_upgradeQ) then
+  if self.made_by_upgradeQ then
     self.current_texrender = self.texture_b
   else
     self.current_texrender = self.texture_a
@@ -402,8 +403,7 @@ function SourceDef:video_render()
   self.made_by_upgradeQ = not self.made_by_upgradeQ
 
   S.gs_texrender_reset(self.texture_c)
-  if S.gs_texrender_begin(self.texture_c, self.width*(self.width/2560), self.height*(self.width/2560)) then
-
+  if S.gs_texrender_begin(self.texture_c, self.width * (self.width / 2560), self.height * (self.width / 2560)) then
     S.gs_clear(self.clear_flags, self.texture_c_clear, 0, 0)
 
     self.pingpong = S.gs_texrender_get_texture(self.current_texrender)
@@ -412,7 +412,7 @@ function SourceDef:video_render()
     S.gs_effect_set_float(self.params.nvertex, self.nvertex_num)
     S.gs_effect_set_float(self.params.width2, self.width)
     S.gs_effect_set_float(self.params.height2, self.height)
-    S.gs_effect_set_float(self.params.scale, self.width/2560)
+    S.gs_effect_set_float(self.params.scale, self.width / 2560)
     while S.gs_effect_loop(self.effect2, "Draw123") do
       S.gs_load_texture(self.pingpong, 0)
       self.PSGetShaderResources(self.pContext2, 0, 1, self.pRes)
@@ -429,13 +429,25 @@ function SourceDef:video_render()
   while S.gs_effect_loop(self.effect3, "Draw") do
     S.gs_draw_sprite(self.tex4, 0, self.width, self.height)
   end
-
 end
 
 function script_load(settings) -- OBS_SOURCE_CUSTOM_DRAW
-  local my_source = SourceDef:new({id='cursor_shader_raster_particles', type=S.OBS_SOURCE_TYPE_SOURCE,
-    output_flags=bit.bor(S.OBS_SOURCE_VIDEO, S.OBS_SOURCE_CUSTOM_DRAW)})
+  local my_source = SourceDef:new({
+    id = "cursor_shader_raster_particles",
+    type = S.OBS_SOURCE_TYPE_SOURCE,
+    output_flags = bit.bor(S.OBS_SOURCE_VIDEO, S.OBS_SOURCE_CUSTOM_DRAW),
+  })
   S.obs_register_source(my_source)
+end
+
+function script_description()
+  return [[
+<h2> cursor skin fx  for OBS Studio </h2>
+<a style="color: #0000ff; text-decoration: none; font-size:26px;"
+href="https://www.github.com/upgradeQ/cursor-skin-fx/blob/master/README.md">Visit the repository README.md</a><br/>
+Copyright &copy; 2026 upgradeQ<br/>
+Distributed under <a style="color: #ffffff; text-decoration: none;"> MIT license</a>
+]]
 end
 
 EFFECT2 = [[
@@ -560,7 +572,7 @@ technique Draw123
 }
 ]]
 
-EFFECT = ([[
+EFFECT = [[
 // OBS-specific syntax adaptation to HLSL standard to avoid errors reported by the code editor
 #define SamplerState sampler_state
 #define Texture2D texture2d
@@ -627,6 +639,4 @@ technique Draw
         pixel_shader  = PassThrough(v_in);
     }
 }
-]])
-
--- vim: ft=lua ts=2 sw=2 et sts=2
+]]
