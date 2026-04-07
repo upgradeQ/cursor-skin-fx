@@ -1,35 +1,35 @@
 # cursor skin fx 
-Those scripts adds a pack of various cursors for OBS Studio.
-Written in LuaJIT 5.2 language version, heavily utilises FFI, currently Windows only.
+
+A collection of visual effects and custom cursors to make your mouse stand out during streams or recordings. 
+
+Built with LuaJIT 5.2 and FFI for high performance. Currently supports **Windows only**.
 
 ## Installation 
-- Move files to some permanent location, select and add .lua files to OBS Studio (Tools > Scripts)
-- You will see new entries in the context menu of sources.
+
+- Move the files to a permanent location, then select and add the `.lua` files to OBS Studio (**Tools** > **Scripts**).
+- New entries will appear in the context menu of your sources.
 
 ## Demo
 
-
 https://github.com/user-attachments/assets/cc13334b-783d-430e-888b-0aacb5e83b38
 
+- **On-click shader** - Shows up to 7 clicks simultaneously.
+- **Motion blur cursor** - A new source that adds 360fps-like motion blur to the cursor. Locked to 60fps; requires Admin rights or running OBS on a second monitor (must not be minimized).
+- **Raster particles** - A new source with 10k stateful unsorted particles. Originally developed for 2560x1440, but works on any 16:9 resolution. 
+- **Ribbon trail** - Adds a simple trail to help track your cursor. Use **additive blending** with this source!
 
-- On click shader  - show up to 7 clicks at the same time.
+## Limitations
 
-- Motion blur cursor - A new source, adds 360fps like motion blur cursor. Locked to 60fps, requires Admin or running OBS on second monitor/not minimized!
+- Multi-monitor setups are currently not supported.
 
-- Raster particles - A new source with 10k stateful unsorted particles, originally developed for a max 2560x1440 resolution, but works on 16:9. 
+## Roadmap
 
-- Ribbon trail - Adds a simple trail so you can track your cursor. Use additive blending with that source!
+- Implement a way to capture the cursor texture (including wait, text, and other states).
 
-# Limitations
-- Multiple monitors setup currently not working.
+## Development
 
-# On the Roadmap
-- Currently the program lacks a way to get the cursor texture(includes cursor wait, text, states)
+Run `~some/path/stylua.exe src/` from the current directory. Amalgamate separate Lua files into one for easier distribution.
 
-# Developing 
-
-Run ~some/path/stylua.exe src/ from current directory. Amalgamate separate Lua files into one for easier distribution.
-
-# Spread the Word
+## Spread the Word
 
 Mention your usage of the program, share reviews, or post about the project on Reddit, X, and other social media.
