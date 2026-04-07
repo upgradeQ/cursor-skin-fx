@@ -8,6 +8,10 @@ Written in LuaJIT 5.2 language version, heavily utilises FFI, currently Windows 
 
 ## Demo
 
+
+https://github.com/user-attachments/assets/cc13334b-783d-430e-888b-0aacb5e83b38
+
+
 - On click shader  - show up to 7 clicks at the same time.
 
 - Motion blur cursor - A new source, adds 360fps like motion blur cursor. Locked to 60fps, requires Admin or running OBS on second monitor/not minimized!
