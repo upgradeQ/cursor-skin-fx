@@ -1,0 +1,967 @@
+// Premium Click FX - libobs effect.
+//
+// Every technique draws one click effect on a quad around the click point.
+// Output is premultiplied alpha. Where rgb exceeds alpha the pixel emits light,
+// so the glowing styles add to the scene instead of veiling it.
+//
+// Written in the subset of HLSL that libobs also translates to GLSL: explicit
+// float literals and casts, no arrays, no globals besides uniforms, and
+// SampleLevel (no derivatives) so sampling inside loops and branches is legal.
+
+uniform float4x4 ViewProj;
+
+uniform texture2d noise_tex;   // RGB: fBm, Voronoi F1, distorted fBm. Tiles both ways.
+uniform texture2d brush_tex;   // R: stroke coverage across v, G: bristles, B: paper grain. Tiles in u.
+uniform texture2d ramp_tex;    // 4-px rows: fire, plasma, blue flame, violet flame.
+uniform texture2d hud_tex;     // Polar HUD atlas, 8 bands of 32 px: R coverage, G element id, B glow.
+uniform texture2d matcap_tex;  // Lit sphere: R diffuse, G sharp specular, B soft sheen.
+
+uniform float4 fx_quad;   // xy: quad top-left relative to the click (px), zw: quad size (px)
+uniform float4 fx_anim;   // x: age (s), y: duration (s), z: seed 0..1, w: unused
+uniform float4 fx_shape;  // x: radius R (px), y: opacity, z: ramp row, w: style (Hold only)
+uniform float4 fx_clip;   // xy: click position in the source (px), zw: source size (px)
+uniform float4 fx_col_a;  // rgb colours; fx_col_a.a > 0.5 means "custom colours" (fire tint)
+uniform float4 fx_col_b;
+uniform float4 fx_col_c;
+uniform float4 fx_col_d;
+
+sampler_state wrap_sampler {
+	Filter   = Linear;
+	AddressU = Wrap;
+	AddressV = Wrap;
+};
+
+sampler_state strip_sampler {
+	Filter   = Linear;
+	AddressU = Wrap;
+	AddressV = Clamp;
+};
+
+sampler_state clamp_sampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv  = v_in.uv;
+	return vert_out;
+}
+
+// ------------------------------------------------------------------ helpers
+
+float hash11(float p)
+{
+	p = frac(p * 0.1031);
+	p *= p + 33.33;
+	p *= p + p;
+	return frac(p);
+}
+
+float hash21(float2 p)
+{
+	float3 p3 = frac(float3(p.x, p.y, p.x) * 0.1031);
+	p3 += dot(p3, p3.yzx + 33.33);
+	return frac((p3.x + p3.y) * p3.z);
+}
+
+float vnoise1(float x)
+{
+	float i = floor(x);
+	float f = frac(x);
+	return lerp(hash11(i), hash11(i + 1.0), f * f * (3.0 - 2.0 * f));
+}
+
+float wrapf(float x, float y)
+{
+	return x - y * floor(x / y);
+}
+
+float2 rot(float2 p, float a)
+{
+	float c = cos(a);
+	float s = sin(a);
+	return float2(c * p.x - s * p.y, s * p.x + c * p.y);
+}
+
+float ease_out_cubic(float t)
+{
+	float u = 1.0 - saturate(t);
+	return 1.0 - u * u * u;
+}
+
+float ease_in_cubic(float t)
+{
+	float u = saturate(t);
+	return u * u * u;
+}
+
+float ease_in_out_cubic(float t)
+{
+	float u = saturate(t);
+	return u < 0.5 ? 4.0 * u * u * u : 1.0 - pow(2.0 - 2.0 * u, 3.0) * 0.5;
+}
+
+float ease_out_expo(float t)
+{
+	float u = saturate(t);
+	return u >= 1.0 ? 1.0 : 1.0 - exp2(-10.0 * u);
+}
+
+float ease_out_back(float t)
+{
+	float u = saturate(t) - 1.0;
+	return 1.0 + 2.70158 * u * u * u + 1.70158 * u * u;
+}
+
+float ease_in_back(float t)
+{
+	float u = saturate(t);
+	return 2.70158 * u * u * u - 1.70158 * u * u;
+}
+
+float gauss(float x, float w)
+{
+	return exp(-(x * x) / max(w * w, 0.0001));
+}
+
+// Coverage of a signed distance given in pixels, with a one-pixel ramp.
+float aa_fill(float d)
+{
+	return saturate(0.5 - d);
+}
+
+float4 paint(float3 rgb, float a)
+{
+	return float4(rgb * a, a);
+}
+
+float4 over(float4 top, float4 under)
+{
+	return top + under * (1.0 - top.a);
+}
+
+float sd_segment(float2 p, float2 a, float2 b)
+{
+	float2 pa = p - a;
+	float2 ba = b - a;
+	float h = saturate(dot(pa, ba) / max(dot(ba, ba), 0.000001));
+	return length(pa - ba * h);
+}
+
+float sd_box(float2 p, float2 b)
+{
+	float2 d = abs(p) - b;
+	return length(max(d, float2(0.0, 0.0))) + min(max(d.x, d.y), 0.0);
+}
+
+float sd_tri(float2 p, float r)
+{
+	float k = 1.7320508;
+	p.x = abs(p.x) - r;
+	p.y = p.y + r / k;
+	if (p.x + k * p.y > 0.0)
+		p = float2(p.x - k * p.y, -k * p.x - p.y) * 0.5;
+	p.x -= clamp(p.x, -2.0 * r, 0.0);
+	return -length(p) * sign(p.y);
+}
+
+float smin(float a, float b, float k)
+{
+	float h = max(k - abs(a - b), 0.0) / max(k, 0.0001);
+	return min(a, b) - h * h * k * 0.25;
+}
+
+// Pointy hexagonal tiling: xy = offset from the cell centre, zw = cell id.
+float4 hex_cell(float2 p)
+{
+	float2 s = float2(1.0, 1.7320508);
+	float2 a = p - s * floor(p / s) - 0.5 * s;
+	float2 q = p - 0.5 * s;
+	float2 b = q - s * floor(q / s) - 0.5 * s;
+	float2 gv = dot(a, a) < dot(b, b) ? a : b;
+	float2 id = p - gv;
+	return float4(gv.x, gv.y, id.x, id.y);
+}
+
+// 0 at the cell centre, 0.5 on its border.
+float hex_metric(float2 gv)
+{
+	float2 g = abs(gv);
+	return max(dot(g, float2(0.5, 0.8660254)), g.x);
+}
+
+float3 ramp(float x, float row)
+{
+	float u = saturate(x) * (255.0 / 256.0) + 0.5 / 256.0;
+	return ramp_tex.SampleLevel(clamp_sampler, float2(u, (row * 4.0 + 2.0) / 16.0), 0.0).rgb;
+}
+
+// One band of the polar HUD atlas laid around a ring.
+// Returns (coverage, element id 0..1, glow).
+float3 hud_ring(float r, float a01, float radius, float width, float band, float spin)
+{
+	float s = (r - radius) / width + 0.5;
+	if (s < 0.0 || s > 1.0)
+		return float3(0.0, 0.0, 0.0);
+	float v = (band * 32.0 + 1.0 + s * 30.0) / 256.0;
+	float3 h = hud_tex.SampleLevel(strip_sampler, float2(a01 + spin, v), 0.0).rgb;
+	return float3(h.r, h.g / max(h.r, 0.02), h.b);
+}
+
+// Light emitted by fire of normalised temperature x, from the Blender ramps or
+// from the user's colours.
+float3 fire_color(float x)
+{
+	if (fx_col_a.a > 0.5) {
+		float3 c = lerp(fx_col_b.rgb * smoothstep(0.0, 0.35, x), fx_col_a.rgb, smoothstep(0.3, 0.75, x));
+		return lerp(c, float3(1.0, 1.0, 0.95), smoothstep(0.8, 1.0, x) * 0.85);
+	}
+	return ramp(x, fx_shape.z);
+}
+
+// Clip to the source rectangle and apply the opacity.
+float4 finish(float4 c, float2 p)
+{
+	float2 g = fx_clip.xy + p;
+	float inside = step(0.0, g.x) * step(0.0, g.y) * step(g.x, fx_clip.z) * step(g.y, fx_clip.w);
+	c *= inside * fx_shape.y;
+	return float4(min(c.rgb, float3(1.0, 1.0, 1.0)), saturate(c.a));
+}
+
+float2 local_pos(float2 uv)
+{
+	return fx_quad.xy + uv * fx_quad.zw;
+}
+
+// ------------------------------------------------------------- 1. Ink spiral
+
+// Arc length of r = k (phi + phi0) from phi = 0 (large-phi approximation).
+float spiral_len(float phi, float k, float phi0)
+{
+	float x = phi + phi0;
+	return 0.5 * k * (x * x - phi0 * phi0);
+}
+
+// A tapered, dry-brush stroke along the spiral r = r0 + k phi, phi in [0, phi_end].
+// Only arc lengths in (s_tail, s_head) are inked. Returns coverage; edge is 0 in
+// the middle of the stroke and 1 on its rim.
+float ink_spiral(float2 q, float r0, float k, float phi_end, float s_tail, float s_head,
+                 float width, float wobble, float boil, float dry, out float edge)
+{
+	edge = 0.0;
+	float r = length(q);
+	float th = atan2(q.y, q.x + 0.00001);
+	if (th < 0.0)
+		th += 6.2831853;
+	float phi0 = r0 / k;
+	float s_end = spiral_len(phi_end, k, phi0);
+	float cov = 0.0;
+	for (int n = 0; n < 6; n++) {
+		float phi = th + 6.2831853 * float(n);
+		if (phi > phi_end)
+			break;
+		float s = spiral_len(phi, k, phi0);
+		float tail = s - s_tail;
+		float head = s_head - s;
+		if (tail > 0.0 && head > 0.0) {
+			float wob = (vnoise1(phi * 0.85 + boil * 7.31) - 0.5) * wobble
+			          + (vnoise1(phi * 2.9 + boil * 3.17 + 19.0) - 0.5) * wobble * 0.4;
+			float rr = r0 + k * phi + wob;
+			float d = (r - rr) * r / sqrt(r * r + k * k);
+			float taper = sqrt(saturate(tail / (width * 2.5)) * saturate(head / (width * 1.6)));
+			float press = 0.8 + 0.2 * vnoise1(s * 0.035 + boil * 0.2);
+			float hw = 0.5 * width * taper * press;
+			if (abs(d) < hw + 1.0) {
+				float2 buv = float2(s / (width * 9.0), 0.5 + 0.5 * d / max(hw, 0.75));
+				float3 b = brush_tex.SampleLevel(strip_sampler, buv, 0.0).rgb;
+				float c = b.r * saturate(hw + 0.5 - abs(d));
+				float dryness = dry * smoothstep(0.55, 1.0, s / s_end) + 0.3 * (1.0 - taper);
+				c *= smoothstep(dryness - 0.12, dryness + 0.12, b.g + 0.15);
+				if (c > cov) {
+					cov = c;
+					edge = smoothstep(0.35, 0.95, abs(d) / max(hw, 0.75));
+				}
+			}
+		}
+	}
+	return cov;
+}
+
+float4 ink_effect(float2 p, float R, float t, float seed)
+{
+	float px = max(R / 110.0, 0.35);
+
+	// Hand-made imperfection: per-click rotation, mirroring and a slight squash.
+	float2 q = rot(p, -seed * 6.2831853);
+	if (hash11(seed * 91.7) > 0.5)
+		q.y = -q.y;
+	q.y *= 1.0 + 0.16 * (hash11(seed * 13.1) - 0.5);
+
+	float phi_end = 2.6 * 6.2831853;
+	float r0 = 0.05 * R;
+	float k = (R - r0) / phi_end;
+	float s_end = spiral_len(phi_end, k, r0 / k);
+	float width = max(2.2, 0.085 * R);
+	float boil = floor(t * 12.0);
+
+	// Ink writes on (fast start so the click reads instantly), then writes off from its start.
+	float edge;
+	float ink = ink_spiral(q, r0, k, phi_end, s_end * ease_in_out_cubic((t - 0.55) / 0.6),
+	                       s_end * ease_out_cubic(t / 0.62), width, 0.035 * R, boil, 0.55, edge);
+
+	// A thin pencil construction line runs just ahead of the ink.
+	float pe;
+	float2 qp = q * 1.012 + float2(0.7, -0.5) * px;
+	float pencil = ink_spiral(qp, r0, k, phi_end, s_end * ease_in_out_cubic((t - 0.36) / 0.6),
+	                          s_end * ease_out_cubic(t / 0.44), max(1.1, 0.02 * R), 0.05 * R,
+	                          boil + 5.0, 0.0, pe);
+
+	// Soft shadow of the ink so it reads on any background.
+	float se;
+	float2 qs = rot(p - float2(1.5, 2.5) * px, -seed * 6.2831853);
+	if (hash11(seed * 91.7) > 0.5)
+		qs.y = -qs.y;
+	qs.y *= 1.0 + 0.16 * (hash11(seed * 13.1) - 0.5);
+	float shadow = ink_spiral(qs, r0, k, phi_end, s_end * ease_in_out_cubic((t - 0.55) / 0.6),
+	                          s_end * ease_out_cubic(t / 0.62), width + 3.0 * px, 0.035 * R, boil, 0.0, se);
+
+	// Emphasis dashes flick out once the spiral is complete.
+	float dash = 0.0;
+	for (int i = 0; i < 6; i++) {
+		float fi = float(i);
+		float a = (fi + 0.35 * hash11(seed * 7.7 + fi)) / 6.0 * 6.2831853 + seed * 2.0;
+		float2 dir = float2(cos(a), sin(a));
+		float t0 = 0.4 + 0.03 * fi;
+		float hd = ease_out_cubic((t - t0) / 0.12);
+		float tl = ease_in_out_cubic((t - t0 - 0.3) / 0.18);
+		if (hd > tl + 0.001) {
+			float ra = R * 1.14;
+			float rb = R * (1.3 + 0.08 * hash11(seed * 5.3 + fi));
+			float along = saturate((dot(p, dir) - ra) / (rb - ra));
+			float taper = pow(max(sin(3.14159265 * saturate((along - tl) / max(hd - tl, 0.001))), 0.0), 0.35);
+			float dd = sd_segment(p, dir * lerp(ra, rb, tl), dir * lerp(ra, rb, hd)) - 0.22 * width * taper;
+			dash = max(dash, aa_fill(dd));
+		}
+	}
+
+	float4 c = paint(fx_col_c.rgb, shadow * 0.28);
+	c = over(paint(fx_col_b.rgb, pencil * 0.7), c);
+	c = over(paint(fx_col_a.rgb * lerp(1.0, 0.72, edge), ink), c);
+	c = over(paint(fx_col_a.rgb, dash), c);
+
+	// Paper grain is fixed to the screen, like the page under a pen.
+	float grain = brush_tex.SampleLevel(wrap_sampler, (p + fx_clip.xy) / float2(512.0, 64.0), 0.0).b;
+	return c * (0.84 + 0.16 * grain);
+}
+
+// ------------------------------------------------------------ 2. Sci-fi pulse
+
+float4 scifi_effect(float2 p, float R, float t, float seed)
+{
+	float px = max(R / 110.0, 0.35);
+	float3 cA = fx_col_a.rgb;
+	float3 cB = fx_col_b.rgb;
+	float3 cC = fx_col_c.rgb;
+
+	// Glitch: thin horizontal slices jump sideways on a few frames.
+	float row = floor(p.y / (5.0 * px));
+	float tick = floor(t * 45.0);
+	float glitch_amt = (1.0 - smoothstep(0.08, 0.16, t)) + smoothstep(0.42, 0.56, t);
+	float glitch = step(0.9, hash21(float2(row, tick + seed * 97.0))) * glitch_amt;
+	p.x += (hash21(float2(row * 3.1, tick + 7.0)) - 0.5) * 16.0 * px * glitch;
+
+	float r = length(p);
+	float a01 = atan2(p.y, p.x + 0.00001) / 6.2831853 + 0.5;
+	// light: emitted colour (premultiplied, may exceed cover so it glows on dark
+	// screens). cover: how much of the backdrop the lines hide. halo: a soft navy
+	// backing that keeps the HUD readable on bright screens.
+	float3 light = float3(0.0, 0.0, 0.0);
+	float cover = 0.0;
+	float halo = 0.0;
+
+	// Core flash with an anamorphic streak.
+	float fl = exp(-t * 14.0);
+	float core = exp(-r / (5.0 * px));
+	float streak = exp(-abs(p.y) / (1.1 * px)) * exp(-abs(p.x) / (R * 0.55)) * (1.0 - smoothstep(1.2 * R, 1.7 * R, abs(p.x)));
+	light += (cC * core * 1.8 + lerp(cB, cC, 0.4) * streak * 1.4) * fl;
+	cover += (core * 0.6 + streak * 0.3) * fl;
+	halo += exp(-r / (14.0 * px)) * fl;
+
+	// Shockwave with a chromatic fringe and a hex-grid wake.
+	float swp = ease_out_expo(t / 0.42);
+	float rs = R * (0.06 + swp);
+	float swf = 1.0 - smoothstep(0.12, 0.5, t);
+	float th = lerp(4.0, 1.3, swp) * px;
+	float dr = r - rs;
+	light += (cA * gauss(dr + 2.2 * px, th) + cB * gauss(dr, th) * 0.8 + cC * gauss(dr - 1.8 * px, th * 0.7) * 0.6) * swf * 1.2;
+	cover += gauss(dr, th * 1.6) * swf * 0.85;
+	halo += gauss(dr, th * 4.0) * swf;
+	float wake = smoothstep(rs - 0.28 * R, rs, r) * (1.0 - smoothstep(rs - px, rs + px, r));
+	float4 hx = hex_cell(p / (12.0 * px));
+	float hedge = 0.5 - hex_metric(hx.xy);
+	float hline = 1.0 - smoothstep(0.025, 0.085, hedge);
+	float hflash = step(0.8, hash21(hx.zw + seed * 13.0)) * smoothstep(0.08, 0.3, hedge);
+	light += cA * (hline * 0.55 + hflash * 0.35 + 0.04) * wake * swf;
+	cover += (hline * 0.35 + 0.04) * wake * swf;
+
+	// HUD rings rendered in Blender: spin, flicker in, unwind out.
+	for (int i = 0; i < 3; i++) {
+		float fi = float(i);
+		float lt = t - 0.03 - 0.04 * fi;
+		if (lt > 0.0) {
+			float rad = R * (0.3 + 0.17 * fi) * lerp(0.7, 1.0, ease_out_back(lt / 0.22));
+			float wid = R * (0.14 - 0.025 * fi);
+			float band = fi < 0.5 ? 3.0 : (fi < 1.5 ? 0.0 : 1.0);
+			float spin = (fi > 0.5 && fi < 1.5 ? -1.0 : 1.0) * (0.3 + 0.2 * fi) * lt + seed;
+			float3 h = hud_ring(r, a01, rad, wid, band, spin);
+			float on = lt < 0.07 ? step(0.4, hash11(floor(lt * 60.0) + fi * 7.0 + seed * 31.0)) : 1.0;
+			float keep = 1.0 - ease_in_out_cubic((t - 0.38 - 0.05 * fi) / 0.24);
+			float wipe = step(frac(a01 - seed * 2.0 - fi * 0.3), keep);
+			float blink = step(0.5, frac(h.y * 7.0 + t * 4.0));
+			float m = on * wipe;
+			light += (cA * h.x * 1.05 + cB * h.x * blink * 0.5 + cA * h.z * 0.35) * m;
+			cover += (h.x * 0.92 + h.z * 0.15) * m;
+			halo += h.z * m;
+		}
+	}
+
+	// Target-lock brackets snap in with a quarter turn.
+	float bt = ease_out_expo((t - 0.02) / 0.3);
+	float bsz = R * lerp(1.15, 0.52, bt);
+	float2 bp = abs(rot(p, -lerp(0.7853982, 0.0, bt)));
+	float arm = R * 0.17;
+	float bd = min(sd_segment(bp, float2(bsz, bsz), float2(bsz - arm, bsz)),
+	               sd_segment(bp, float2(bsz, bsz), float2(bsz, bsz - arm))) - 1.1 * px;
+	float bvis = smoothstep(0.02, 0.06, t) * (1.0 - smoothstep(0.5, 0.66, t));
+	bvis *= t > 0.5 ? step(0.35, hash11(floor(t * 50.0) + seed * 17.0)) : 1.0;
+	float bglow = exp(-max(bd, 0.0) / (3.0 * px));
+	light += ((cA + cB * 0.5) * aa_fill(bd) + cA * bglow * 0.3) * bvis;
+	cover += aa_fill(bd) * 0.92 * bvis;
+	halo += bglow * bvis;
+
+	// Data streaks race outward.
+	for (int j = 0; j < 12; j++) {
+		float fj = float(j);
+		float h1 = hash11(seed * 31.0 + fj * 7.17);
+		float h2 = hash11(seed * 17.0 + fj * 3.31);
+		float sa = (fj + h1 * 0.8) / 12.0 * 6.2831853;
+		float2 dir = float2(cos(sa), sin(sa));
+		float st = (t - 0.02 - h2 * 0.06) / 0.34;
+		if (st > 0.0 && st < 1.0) {
+			float head = R * (0.18 + (0.95 + 0.35 * h2) * ease_out_cubic(st));
+			float tail = max(head - R * 0.24 * (1.0 - st) - 2.0 * px, R * 0.15);
+			float d = sd_segment(p, dir * tail, dir * head) - 0.55 * px;
+			float pk = sd_box(rot(p - dir * head, -sa), float2(2.2, 2.2) * px);
+			float vis = 1.0 - smoothstep(0.7, 1.0, st);
+			float body = max(aa_fill(d), aa_fill(pk) * step(0.5, h1));
+			light += (lerp(cA, cB, 0.5) * aa_fill(d) + cC * aa_fill(pk) * step(0.5, h1)) * vis;
+			cover += body * vis * 0.9;
+			halo += gauss(d, 3.0 * px) * vis * 0.6;
+		}
+	}
+
+	// Scanlines.
+	light *= 0.86 + 0.14 * step(0.5, frac(p.y / (3.0 * px)));
+	return over(float4(light, saturate(cover)), paint(float3(0.0, 0.03, 0.1), saturate(halo) * 0.32));
+}
+
+// ----------------------------------------------------------- 3. Inferno burst
+
+float4 fire_effect(float2 p, float R, float t, float seed)
+{
+	float px = max(R / 110.0, 0.35);
+	float2 so = float2(seed * 7.31, seed * 3.77);
+	float2 q = p / R;
+
+	// Turbulent warp scrolling down in sample space, so detail climbs upward.
+	// Noise is sampled at roughly one texel per pixel at R = 110 px.
+	float2 w1 = noise_tex.SampleLevel(wrap_sampler, q * 0.18 + so + float2(0.0, t * 0.3), 0.0).rb - 0.5;
+	float2 qw = q + w1 * (0.18 + 0.25 * saturate(t * 2.0));
+
+	// Fireballs: thrown outward, lifted by buoyancy, growing and cooling.
+	float heat = 0.0;
+	for (int i = 0; i < 9; i++) {
+		float fi = float(i);
+		float h1 = hash11(seed * 17.3 + fi * 1.73);
+		float h2 = hash11(seed * 41.9 + fi * 2.39);
+		float h3 = hash11(seed * 7.7 + fi * 3.91);
+		float a = (fi + 0.8 * h1) / 9.0 * 6.2831853;
+		float2 c = float2(cos(a), sin(a)) * (0.22 + 0.5 * h2) * ease_out_cubic(t / 0.4)
+		         + float2(0.0, -(0.3 + 0.45 * h3) * t * t);
+		float rad = (0.17 + 0.12 * h3) * (0.6 + 0.4 * ease_out_cubic(t / 0.25)) + 0.18 * t;
+		float2 d = (qw - c) / rad;
+		d.y *= d.y < 0.0 ? 0.75 : 1.15;
+		float life = 0.9 + 0.35 * h1;
+		heat += exp(-dot(d, d) * 1.6) * (1.0 - smoothstep(0.3 * life, life, t));
+	}
+	// The ignition fireball at the click point.
+	float cr = length(qw) / (0.18 + 0.32 * ease_out_cubic(t / 0.12));
+	heat += exp(-cr * cr * 1.5) * (1.0 - smoothstep(0.05, 0.35, t)) * 1.2;
+
+	float det = noise_tex.SampleLevel(wrap_sampler, qw * 0.24 + so + float2(0.0, t * 0.35), 0.0).r;
+	float wisp = noise_tex.SampleLevel(wrap_sampler, qw * 0.16 - so + float2(0.0, t * 0.22), 0.0).b;
+	float T = saturate(heat * (0.3 + 0.95 * det) * (0.55 + 0.75 * wisp) - 0.08 - 0.22 * smoothstep(0.3, 1.15, t));
+
+	float4 c = float4(fire_color(T) * smoothstep(0.0, 0.32, T), smoothstep(0.03, 0.5, T) * 0.85);
+
+	// Smoke rises faster than the flames and stays behind them.
+	float2 qm = q + float2(0.0, 0.3 * t + 0.9 * t * t);
+	float sn = noise_tex.SampleLevel(wrap_sampler, qm * 0.2 + so * 1.3 + float2(0.0, t * 0.12), 0.0).r;
+	float sr = length(qm * float2(1.0, 0.8)) / (0.5 + 0.4 * t);
+	float smoke = saturate(exp(-sr * sr) * (sn * 1.4 - 0.35)) * smoothstep(0.2, 0.5, t) * (1.0 - smoothstep(0.8, 1.25, t));
+	c = over(c, paint(float3(0.05, 0.045, 0.04), smoke * 0.35));
+
+	// Ignition flash and heat shock.
+	float pr = length(p);
+	float shock = gauss(pr - R * (0.1 + 0.9 * ease_out_expo(t / 0.25)), 3.0 * px) * (1.0 - smoothstep(0.05, 0.25, t));
+	float flash = exp(-pr / (10.0 * px)) * exp(-t * 18.0);
+	c.rgb += fire_color(0.88) * shock * 0.8 + fire_color(1.0) * flash;
+	c.a = max(c.a, saturate(flash) * 0.6);
+
+	// Embers: drag + buoyancy ballistics, motion-blurred over 1/30 s, cooling as they fly.
+	for (int j = 0; j < 18; j++) {
+		float fj = float(j);
+		float h1 = hash11(seed * 53.1 + fj * 1.37);
+		float h2 = hash11(seed * 23.7 + fj * 2.71);
+		float h3 = hash11(seed * 11.3 + fj * 4.13);
+		float life = 0.55 + 0.6 * h3;
+		float tt = t - 0.03 * h3;
+		if (tt > 0.0 && tt < life) {
+			float a0 = h1 * 6.2831853;
+			float2 v0 = float2(cos(a0), sin(a0)) * R * (1.4 + 2.2 * h2);
+			float2 g = float2(0.0, -R * 1.6);
+			float e = exp(-3.0 * tt);
+			float2 pos = v0 * (1.0 - e) / 3.0 + g * (tt / 3.0 - (1.0 - e) / 9.0);
+			float2 vel = v0 * e + g * (1.0 - e) / 3.0;
+			float d = sd_segment(p, pos - vel * 0.035, pos);
+			float ember = 1.0 - tt / life;
+			float rad = (0.8 + 1.2 * ember) * px;
+			float flick = 0.7 + 0.3 * sin(tt * 40.0 + fj * 3.0);
+			float body = aa_fill(d - rad);
+			float halo = gauss(d, rad * 3.0) * 0.45;
+			c.rgb += fire_color(0.55 + 0.45 * ember) * (body + halo) * flick * smoothstep(0.0, 0.25, ember);
+			c.a = max(c.a, body * 0.7 * smoothstep(0.0, 0.25, ember));
+		}
+	}
+	return c;
+}
+
+// ------------------------------------------------------------- 4. MoGraph pop
+
+float4 pop_effect(float2 p, float R, float t, float seed)
+{
+	float px = max(R / 110.0, 0.35);
+	float r = length(p);
+	float4 acc = float4(0.0, 0.0, 0.0, 0.0);
+
+	// Ring: expands while its stroke thins away.
+	float rt = saturate(t / 0.45);
+	float rr = R * (0.15 + 0.75 * ease_out_expo(rt));
+	float rw = R * 0.18 * (1.0 - ease_out_cubic(rt));
+	acc = over(paint(fx_col_a.rgb, aa_fill(abs(r - rr) - 0.5 * rw) * step(0.2, rw)), acc);
+
+	// Echo ring, thin and late.
+	float et = saturate((t - 0.1) / 0.5);
+	float er = R * (0.2 + 0.85 * ease_out_expo(et));
+	float ew = 1.6 * px * (1.0 - et);
+	acc = over(paint(fx_col_b.rgb, aa_fill(abs(r - er) - ew) * step(0.001, ew)), acc);
+
+	// Burst lines with trim-path timing; even lines long, odd lines short.
+	for (int i = 0; i < 8; i++) {
+		float fi = float(i);
+		float even = step(frac(fi * 0.5), 0.25);
+		float a = fi * 0.7853982 + seed * 6.2831853;
+		float2 dir = float2(cos(a), sin(a));
+		float base = R * 0.48;
+		float reach = R * lerp(0.95, 1.18, even) - base;
+		float head = base + reach * ease_out_expo((t - 0.06) / 0.4);
+		float tail = base + reach * ease_out_expo((t - 0.15) / 0.4);
+		float lw = R * lerp(0.04, 0.055, even);
+		float d = sd_segment(p, dir * tail, dir * head) - 0.5 * lw;
+		float vis = step(tail + 0.75, head);
+		acc = over(paint(lerp(fx_col_c.rgb, fx_col_b.rgb, even), aa_fill(d) * vis), acc);
+	}
+
+	// Confetti: triangles, rounded squares, dots and crosses.
+	for (int j = 0; j < 9; j++) {
+		float fj = float(j);
+		float h1 = hash11(seed * 71.3 + fj * 1.91);
+		float h2 = hash11(seed * 37.9 + fj * 3.17);
+		float h3 = hash11(seed * 19.1 + fj * 5.23);
+		float a = (fj + h1 * 0.7) / 9.0 * 6.2831853 + seed * 3.0 + 0.4;
+		float ct = saturate((t - 0.05) / 0.6);
+		float2 cpos = float2(cos(a), sin(a)) * R * (0.35 + (0.55 + 0.35 * h2) * ease_out_cubic(ct))
+		            + float2(0.0, R * 0.22 * ct * ct);
+		float sz = R * (0.05 + 0.03 * h3) * ease_out_back((t - 0.05) / 0.15) * (1.0 - ease_in_cubic((t - 0.45) / 0.35));
+		if (sz > 0.3) {
+			float spin = h1 * 6.2831853 + t * (4.0 + 6.0 * h2) * (h3 > 0.5 ? 1.0 : -1.0);
+			float2 lp = rot(p - cpos, -spin);
+			float kind = floor(h3 * 4.0);
+			float d;
+			if (kind < 0.5)
+				d = sd_tri(lp, sz);
+			else if (kind < 1.5)
+				d = sd_box(lp, float2(sz, sz) * 0.75) - sz * 0.15;
+			else if (kind < 2.5)
+				d = length(lp) - sz * 0.75;
+			else
+				d = min(sd_box(lp, float2(sz, sz * 0.3)), sd_box(lp, float2(sz * 0.3, sz)));
+			float pick = floor(h2 * 4.0);
+			float3 col = pick < 0.5 ? fx_col_a.rgb : (pick < 1.5 ? fx_col_b.rgb : (pick < 2.5 ? fx_col_c.rgb : fx_col_d.rgb));
+			acc = over(paint(col, aa_fill(d)), acc);
+		}
+	}
+
+	// Centre dot pops, then shrinks away.
+	float ds = ease_out_back(t / 0.14) * (1.0 - ease_in_cubic((t - 0.14) / 0.22));
+	acc = over(paint(fx_col_d.rgb, aa_fill(r - R * 0.17 * ds) * step(0.01, ds)), acc);
+	return acc;
+}
+
+// ---------------------------------------------------------- 5. Liquid splash
+
+float liquid_sdf(float2 p, float R, float t, float seed)
+{
+	// Main blob overshoots on impact, wobbles, then drains away.
+	float grow = ease_out_back(t / 0.16);
+	float drain = ease_in_cubic((t - 0.55) / 0.5);
+	float ang = atan2(p.y, p.x + 0.00001);
+	float wob = (sin(ang * 3.0 + seed * 6.0 + t * 9.0) * 0.06 + sin(ang * 5.0 - seed * 4.0 - t * 7.0) * 0.04) * exp(-t * 2.5);
+	float d = length(p) - R * 0.3 * grow * (1.0 - drain) * (1.0 + wob);
+
+	// Droplets fly out as teardrops; their goo bridges thin and snap.
+	float k = R * 0.24 * (1.0 - smoothstep(0.05, 0.42, t));
+	for (int i = 0; i < 7; i++) {
+		float fi = float(i);
+		float h1 = hash11(seed * 41.0 + fi * 2.3);
+		float h2 = hash11(seed * 29.0 + fi * 4.1);
+		float a = (fi + 0.6 * h1) / 7.0 * 6.2831853;
+		float2 dir = float2(cos(a), sin(a));
+		float tt = saturate(t / (0.45 + 0.2 * h2));
+		float2 c = dir * R * (0.32 + 0.6 * h2) * ease_out_cubic(tt);
+		float rad = R * (0.07 + 0.055 * h1) * (1.0 - ease_in_cubic((t - 0.35 - 0.25 * h2) / 0.45));
+		float tailr = R * 0.26 * (1.0 - tt) * (1.0 - tt);
+		float dd = sd_segment(p, c - dir * tailr, c) - rad;
+		d = smin(d, dd, k);
+	}
+	// Specks: tiny separate droplets thrown furthest.
+	for (int j = 0; j < 6; j++) {
+		float fj = float(j);
+		float h1 = hash11(seed * 13.0 + fj * 5.7);
+		float h2 = hash11(seed * 61.0 + fj * 1.9);
+		float a = (fj + h1) / 6.0 * 6.2831853 + 0.5;
+		float st = saturate((t - 0.04) / 0.5);
+		float2 c = float2(cos(a), sin(a)) * R * (0.4 + (0.6 + 0.3 * h2) * ease_out_cubic(st));
+		float rad = R * (0.018 + 0.016 * h2) * (1.0 - ease_in_cubic((t - 0.4) / 0.4));
+		d = min(d, length(p - c) - rad);
+	}
+	return d;
+}
+
+float4 liquid_effect(float2 p, float R, float t, float seed)
+{
+	float px = max(R / 110.0, 0.35);
+	float d0 = liquid_sdf(p, R, t, seed);
+	float dx = liquid_sdf(p + float2(1.0, 0.0), R, t, seed) - d0;
+	float dy = liquid_sdf(p + float2(0.0, 1.0), R, t, seed) - d0;
+
+	// Dome profile from the distance field: steep at the rim, flat on top, so the
+	// normal leans outward at the edge and faces the viewer in the middle.
+	float bev = max(R * 0.14, 3.0);
+	float k = saturate(-d0 / bev);
+	float tilt = 2.6 * (1.0 - k) * (1.0 - k) + 0.25 * (1.0 - k);
+	float3 n = normalize(float3(float2(dx, dy) * tilt, 1.0));
+	float3 m = matcap_tex.SampleLevel(clamp_sampler, n.xy * 0.5 + 0.5, 0.0).rgb;
+	float3 col = fx_col_a.rgb * (0.28 + 0.9 * m.r) + fx_col_b.rgb * m.b * 0.4 + m.g * 0.95;
+	col *= lerp(0.82, 1.0, saturate(k * 1.5));
+	float4 c = paint(min(col, float3(1.0, 1.0, 1.0)), aa_fill(d0));
+
+	// Ripple ring left on the surface by the impact.
+	float rt = saturate(t / 0.7);
+	float ripple = aa_fill(abs(length(p) - R * (0.3 + 0.9 * ease_out_cubic(rt))) - 1.2 * px) * (1.0 - rt);
+	c = over(c, paint(fx_col_b.rgb, ripple * 0.55));
+
+	// Contact shadow under the liquid.
+	float ds = liquid_sdf(p - float2(0.0, 4.0) * px, R, t, seed);
+	float sh = 1.0 - smoothstep(-2.0 * px, 7.0 * px, ds);
+	return over(c, paint(fx_col_c.rgb, sh * 0.22));
+}
+
+// ---------------------------------------------------------- 6. Halftone shock
+
+// Jagged comic burst: spikes of random length around radius rad.
+float sd_burst(float2 p, float rad, float inner, float spikes, float seed)
+{
+	float a = atan2(p.y, p.x + 0.00001);
+	if (a < 0.0)
+		a += 6.2831853;
+	float seg = 6.2831853 / spikes;
+	float k = floor(a / seg);
+	float d = 100000.0;
+	float inside_sign = 1.0;
+	for (int i = -1; i < 2; i++) {
+		float kk = k + float(i);
+		float ka = wrapf(kk, spikes);
+		float kb = wrapf(kk + 1.0, spikes);
+		float2 v0 = float2(cos(kk * seg), sin(kk * seg)) * rad * (0.74 + 0.26 * hash11(seed * 9.1 + ka * 1.7));
+		float2 v1 = float2(cos((kk + 0.5) * seg), sin((kk + 0.5) * seg)) * rad * inner * (0.9 + 0.2 * hash11(seed * 3.3 + ka * 2.9));
+		float2 v2 = float2(cos((kk + 1.0) * seg), sin((kk + 1.0) * seg)) * rad * (0.74 + 0.26 * hash11(seed * 9.1 + kb * 1.7));
+		d = min(d, min(sd_segment(p, v0, v1), sd_segment(p, v1, v2)));
+		if (i == 0) {
+			// Inside test against the edge that spans p's angle.
+			float2 ea = a < (k + 0.5) * seg ? v0 : v1;
+			float2 eb = a < (k + 0.5) * seg ? v1 : v2;
+			float2 e = eb - ea;
+			float side_p = e.x * (p.y - ea.y) - e.y * (p.x - ea.x);
+			float side_o = e.x * (-ea.y) - e.y * (-ea.x);
+			inside_sign = side_p * side_o > 0.0 ? -1.0 : 1.0;
+		}
+	}
+	return d * inside_sign;
+}
+
+// Halftone dot coverage for tone 0..1 on a rotated grid of the given pitch (px).
+float halftone(float2 p, float pitch, float tone)
+{
+	float2 g = rot(p, 0.2617994) / pitch;
+	float2 cell = frac(g) - 0.5;
+	// Below 3 % tone the dots vanish entirely instead of leaving sub-pixel specks.
+	return aa_fill((length(cell) - 0.72 * sqrt(saturate((tone - 0.03) / 0.97))) * pitch) * step(0.03, tone);
+}
+
+float4 halftone_effect(float2 p, float R, float t, float seed)
+{
+	float px = max(R / 110.0, 0.35);
+	float r = length(p);
+	float4 acc = float4(0.0, 0.0, 0.0, 0.0);
+	float pitch = max(3.5, 7.0 * px);
+
+	// Halftone shockwave: dots swell where the wavefront passes.
+	float st = saturate(t / 0.6);
+	float front = R * (0.35 + 0.95 * ease_out_cubic(st));
+	float tone = gauss(r - front, R * 0.16) * (1.0 - st) * 0.95;
+	acc = over(paint(fx_col_b.rgb, halftone(p + fx_clip.xy, pitch, tone)), acc);
+
+	// Action lines: thin wedges shooting outward.
+	for (int i = 0; i < 16; i++) {
+		float fi = float(i);
+		float h1 = hash11(seed * 43.0 + fi * 3.7);
+		float a = (fi + 0.6 * h1) / 16.0 * 6.2831853;
+		float2 dir = float2(cos(a), sin(a));
+		float lt = saturate((t - 0.02 - 0.03 * h1) / 0.32);
+		float rin = R * (0.62 + 0.55 * ease_out_cubic(lt));
+		float rout = rin + R * (0.25 + 0.2 * h1) * (1.0 - lt);
+		float along = dot(p, dir);
+		float across = abs(dir.x * p.y - dir.y * p.x);
+		float w = 2.2 * px * saturate((along - rin) / max(rout - rin, 0.001));
+		float wedge = aa_fill(across - w) * step(rin, along) * step(along, rout) * step(0.0, 1.0 - lt);
+		acc = over(paint(fx_col_c.rgb, wedge), acc);
+	}
+
+	// Comic burst: ink outline, yellow fill with halftone shading, red core.
+	float s1 = ease_out_back(t / 0.16) * (1.0 - ease_in_back((t - 0.42) / 0.2));
+	float tilt = seed * 6.2831853 + 0.12 * sin(t * 22.0) * exp(-t * 6.0);
+	float2 bp = rot(p, -tilt);
+	if (s1 > 0.01) {
+		float b1 = sd_burst(bp, R * 0.66 * s1, 0.62, 14.0, seed);
+		acc = over(paint(fx_col_c.rgb, aa_fill(b1 - 3.0 * px)), acc);
+		acc = over(paint(fx_col_a.rgb, aa_fill(b1)), acc);
+		float shade = smoothstep(-R * 0.35 * s1, 0.0, b1);
+		acc = over(paint(fx_col_d.rgb, halftone(p + fx_clip.xy, pitch * 0.8, shade * 0.75) * aa_fill(b1 + 1.0)), acc);
+	}
+	float s2 = ease_out_back((t - 0.04) / 0.16) * (1.0 - ease_in_back((t - 0.38) / 0.2));
+	if (s2 > 0.01) {
+		float b2 = sd_burst(rot(bp, 0.3), R * 0.34 * s2, 0.6, 10.0, seed + 0.37);
+		acc = over(paint(fx_col_c.rgb, aa_fill(b2 - 2.0 * px)), acc);
+		acc = over(paint(fx_col_b.rgb, aa_fill(b2)), acc);
+		acc = over(paint(float3(1.0, 1.0, 1.0), aa_fill(length(bp + float2(0.07, 0.07) * R * s2) - 0.045 * R * s2)), acc);
+	}
+	return acc;
+}
+
+// -------------------------------------------------------- hold indicators
+
+float4 hold_effect(float2 p, float R, float t, float style, float seed)
+{
+	float px = max(R / 110.0, 0.35);
+	float r = length(p);
+	float a01 = atan2(p.y, p.x + 0.00001) / 6.2831853 + 0.5;
+	float intro = ease_out_back(t / 0.22);
+	float4 c = float4(0.0, 0.0, 0.0, 0.0);
+
+	if (style < 0.5) {
+		// Ink: a hand-drawn circle that overshoots its start, boiling.
+		float rad = 0.36 * R;
+		float k = 0.035 * R / 6.2831853;
+		float phi_end = 6.2831853 * 1.12;
+		float s_end = spiral_len(phi_end, k, rad / k);
+		float e;
+		float cov = ink_spiral(rot(p, -seed * 6.2831853), rad, k, phi_end, -1.0,
+		                       s_end * ease_in_out_cubic(t / 0.3) + 0.01, max(2.0, 0.07 * R),
+		                       0.03 * R, floor(t * 12.0), 0.2, e);
+		c = paint(fx_col_a.rgb * lerp(1.0, 0.75, e), cov);
+	} else if (style < 1.5) {
+		// Sci-fi: counter-rotating HUD rings around a pulsing core.
+		float3 h1 = hud_ring(r, a01, 0.42 * R * intro, 0.1 * R, 0.0, t * 0.25);
+		float3 h2 = hud_ring(r, a01, 0.29 * R * intro, 0.07 * R, 1.0, -t * 0.4);
+		float pulse = 0.75 + 0.25 * sin(t * 9.0);
+		float dotc = aa_fill(r - 2.5 * px);
+		float lines = h1.x + h2.x;
+		float3 light = (fx_col_a.rgb * lines * 1.05 + fx_col_b.rgb * lines * 0.35 + fx_col_a.rgb * (h1.z + h2.z) * 0.3) * pulse
+		             + fx_col_c.rgb * dotc;
+		c = over(float4(light, saturate(lines * 0.92 + dotc)), paint(float3(0.0, 0.03, 0.1), saturate(h1.z + h2.z) * 0.32));
+	} else if (style < 2.5) {
+		// Fire: a smouldering ring with flames licking upward.
+		float2 q = p / R;
+		float2 w1 = noise_tex.SampleLevel(wrap_sampler, q * 0.2 + float2(seed, t * 0.25), 0.0).rb - 0.5;
+		float2 qw = q + w1 * 0.22;
+		float2 qs = float2(qw.x, qw.y * (1.0 - 0.45 * smoothstep(0.0, -0.5, qw.y)));
+		float rr = length(qs);
+		float fl = noise_tex.SampleLevel(wrap_sampler, float2(atan2(qs.y, qs.x + 0.00001) / 6.2831853, rr * 0.35 - t * 0.45), 0.0).b;
+		float ring = exp(-pow((rr - 0.33 * intro) / (0.06 + 0.1 * fl), 2.0));
+		float T = saturate(ring * (0.55 + 0.8 * fl) - 0.08);
+		c = float4(fire_color(T) * smoothstep(0.0, 0.3, T), smoothstep(0.03, 0.5, T) * 0.85);
+	} else if (style < 3.5) {
+		// MoGraph: a breathing ring with an orbiting dot.
+		float rad = 0.38 * R * intro * (1.0 + 0.06 * sin(t * 6.0));
+		float ring = aa_fill(abs(r - rad) - 2.0 * px);
+		float2 orb = float2(cos(t * 5.0), sin(t * 5.0)) * rad;
+		c = over(paint(fx_col_b.rgb, aa_fill(length(p - orb) - 4.5 * px)), paint(fx_col_a.rgb, ring));
+	} else if (style < 4.5) {
+		// Liquid: a wobbling glossy ring.
+		float ang = atan2(p.y, p.x + 0.00001);
+		float rad = 0.36 * R * intro * (1.0 + 0.05 * sin(ang * 3.0 + t * 5.0) + 0.03 * sin(ang * 5.0 - t * 4.0));
+		float tw = 0.07 * R;
+		float across = clamp((r - rad) / tw, -1.0, 1.0);
+		float3 n = normalize(float3((p / max(r, 0.001)) * across * 0.9, sqrt(max(1.0 - across * across, 0.05))));
+		float3 m = matcap_tex.SampleLevel(clamp_sampler, n.xy * 0.5 + 0.5, 0.0).rgb;
+		float3 col = fx_col_a.rgb * (0.28 + 0.9 * m.r) + fx_col_b.rgb * m.b * 0.4 + m.g * 0.95;
+		c = paint(min(col, float3(1.0, 1.0, 1.0)), aa_fill(abs(r - rad) - tw));
+	} else {
+		// Halftone: a rotating ring of dots inside an ink circle.
+		float rad = 0.36 * R * intro;
+		float cells = 18.0;
+		float cellc = floor(a01 * cells + t * 0.8) + 0.5;
+		float ca = ((cellc - t * 0.8) / cells - 0.5) * 6.2831853;
+		float dd = length(p - float2(cos(ca), sin(ca)) * rad) - 0.045 * R;
+		float outline = aa_fill(abs(r - rad * 1.28) - 1.6 * px);
+		c = over(paint(fx_col_b.rgb, aa_fill(dd)), paint(fx_col_c.rgb, outline));
+	}
+	return c;
+}
+
+// --------------------------------------------------------------- techniques
+
+float4 PSInk(VertData v_in) : TARGET
+{
+	float2 p = local_pos(v_in.uv);
+	return finish(ink_effect(p, fx_shape.x, fx_anim.x, fx_anim.z), p);
+}
+
+float4 PSSciFi(VertData v_in) : TARGET
+{
+	float2 p = local_pos(v_in.uv);
+	return finish(scifi_effect(p, fx_shape.x, fx_anim.x, fx_anim.z), p);
+}
+
+float4 PSFire(VertData v_in) : TARGET
+{
+	float2 p = local_pos(v_in.uv);
+	return finish(fire_effect(p, fx_shape.x, fx_anim.x, fx_anim.z), p);
+}
+
+float4 PSPop(VertData v_in) : TARGET
+{
+	float2 p = local_pos(v_in.uv);
+	return finish(pop_effect(p, fx_shape.x, fx_anim.x, fx_anim.z), p);
+}
+
+float4 PSLiquid(VertData v_in) : TARGET
+{
+	float2 p = local_pos(v_in.uv);
+	return finish(liquid_effect(p, fx_shape.x, fx_anim.x, fx_anim.z), p);
+}
+
+float4 PSHalftone(VertData v_in) : TARGET
+{
+	float2 p = local_pos(v_in.uv);
+	return finish(halftone_effect(p, fx_shape.x, fx_anim.x, fx_anim.z), p);
+}
+
+float4 PSHold(VertData v_in) : TARGET
+{
+	float2 p = local_pos(v_in.uv);
+	return finish(hold_effect(p, fx_shape.x, fx_anim.x, fx_shape.w, fx_anim.z), p);
+}
+
+technique Ink
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSInk(v_in);
+	}
+}
+
+technique SciFi
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSSciFi(v_in);
+	}
+}
+
+technique Fire
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSFire(v_in);
+	}
+}
+
+technique Pop
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSPop(v_in);
+	}
+}
+
+technique Liquid
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSLiquid(v_in);
+	}
+}
+
+technique Halftone
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSHalftone(v_in);
+	}
+}
+
+technique Hold
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSHold(v_in);
+	}
+}

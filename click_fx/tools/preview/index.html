@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Click FX Preview</title>
+<style>
+  :root {
+    --bg: #0e1014;
+    --panel: #161920;
+    --line: #252a35;
+    --text: #e6e8ee;
+    --muted: #8b93a7;
+    --accent: #4da3ff;
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center;
+    padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header strong { font-size: 14px; letter-spacing: .02em; }
+  label { display: flex; gap: 6px; align-items: center; color: var(--muted); }
+  select, button { font: inherit; color: var(--text); background: #1f2430; border: 1px solid #2f3646;
+    border-radius: 6px; padding: 4px 8px; }
+  button:hover, select:hover { border-color: var(--accent); }
+  input[type=range] { width: 110px; accent-color: var(--accent); }
+  #stage { position: relative; }
+  canvas { display: block; width: 100%; height: calc(100vh - 50px); cursor: crosshair; touch-action: none; }
+  #labels { position: absolute; inset: 0; pointer-events: none; }
+  #labels span { position: absolute; font: 11px/1 ui-monospace, Consolas, monospace; color: #c9d1e0;
+    background: rgba(0, 0, 0, .55); padding: 3px 5px; border-radius: 4px; }
+  #err { position: fixed; left: 16px; right: 16px; bottom: 16px; max-height: 45vh; overflow: auto; margin: 0;
+    padding: 12px; background: #2a1215; color: #ffb4b4; border: 1px solid #5c2329; border-radius: 8px;
+    font: 12px/1.45 ui-monospace, Consolas, monospace; white-space: pre-wrap; display: none; }
+  .hint { color: var(--muted); }
+  @media (max-width: 640px) { input[type=range] { width: 80px; } .hint { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <strong>Premium Click FX</strong>
+  <label>Style <select id="style"></select></label>
+  <label>Size <input id="size" type="range" min="0.5" max="2" step="0.05" value="1"></label>
+  <label>Speed <input id="speed" type="range" min="0.5" max="2" step="0.05" value="1"></label>
+  <label>Backdrop <select id="bg">
+    <option value="0">Dark UI</option>
+    <option value="1">Light UI</option>
+    <option value="2">Mid grey</option>
+  </select></label>
+  <label><input id="auto" type="checkbox"> Auto demo</label>
+  <button id="sheetBtn">Contact sheet</button>
+  <span class="hint">Click or hold on the canvas. Same .effect file and textures OBS loads.</span>
+</header>
+<div id="stage">
+  <canvas id="c"></canvas>
+  <div id="labels"></div>
+</div>
+<pre id="err"></pre>
+<script>
+"use strict";
+
+// Mirror of STYLES in premium_click_fx.lua (keep in sync).
+const STYLES = [
+  { name: "Ink Spiral",     tech: "Ink",      dur: 1.25, rmul: 1.0,  ext: [-1.5, -1.5, 1.5, 1.5],
+    colors: ["#FF4136", "#FFB3A7", "#000000", "#000000"] },
+  { name: "Sci-Fi Pulse",   tech: "SciFi",    dur: 0.78, rmul: 1.0,  ext: [-1.8, -1.8, 1.8, 1.8],
+    colors: ["#1E8BFF", "#6FF4FF", "#E8FBFF", "#000000"] },
+  { name: "Inferno Burst",  tech: "Fire",     dur: 1.3,  rmul: 0.95, ext: [-1.6, -2.3, 1.6, 1.2],
+    colors: ["#FF7A1A", "#7A0A00", "#000000", "#000000"] },
+  { name: "MoGraph Pop",    tech: "Pop",      dur: 0.85, rmul: 0.9,  ext: [-1.5, -1.5, 1.5, 1.65],
+    colors: ["#FF4F81", "#FFC93C", "#2EC4B6", "#7B5CFF"] },
+  { name: "Liquid Splash",  tech: "Liquid",   dur: 1.1,  rmul: 0.85, ext: [-1.4, -1.4, 1.4, 1.45],
+    colors: ["#8B5CF6", "#F0ABFC", "#1E1035", "#000000"] },
+  { name: "Halftone Shock", tech: "Halftone", dur: 0.7,  rmul: 0.9,  ext: [-1.65, -1.65, 1.65, 1.65],
+    colors: ["#FFE14D", "#FF3B30", "#141414", "#FF8A00"] },
+];
+const HOLD_EXT = [-0.8, -1.05, 0.8, 0.8], HOLD_DELAY = 0.12, HOLD_FADE_IN = 0.08, HOLD_FADE_OUT = 0.15;
+
+const params = new URLSearchParams(location.search);
+const canvas = document.getElementById("c");
+const gl = canvas.getContext("webgl2", { premultipliedAlpha: true, alpha: false, antialias: false });
+const errBox = document.getElementById("err");
+function fail(msg) { errBox.style.display = "block"; errBox.textContent += msg + "\n"; console.error(msg); }
+
+// ---------------------------------------------------------------- effect -> GLSL
+function translateEffect(src) {
+  const samplers = {};
+  src = src.replace(/sampler_state\s+(\w+)\s*\{([^}]*)\}\s*;/g, (m, name, body) => {
+    const get = (k) => ((body.match(new RegExp(k + "\\s*=\\s*(\\w+)")) || [])[1] || "").toLowerCase();
+    samplers[name] = { filter: get("Filter"), u: get("AddressU"), v: get("AddressV") };
+    return "";
+  });
+  const techniques = {};
+  src = src.replace(/technique\s+(\w+)\s*\{\s*pass\s*\{([\s\S]*?)\}\s*\}/g, (m, name, body) => {
+    techniques[name] = body.match(/pixel_shader\s*=\s*(\w+)\s*\(/)[1];
+    return "";
+  });
+  src = src.replace(/uniform\s+float4x4\s+ViewProj\s*;/, "");
+  src = src.replace(/VertData\s+VSDefault\s*\([^)]*\)\s*\{[\s\S]*?\n\}/, "");
+  src = src.replace(/:\s*(POSITION|TEXCOORD\d|TARGET)\b/g, "");
+  src = src.replace(/uniform\s+texture2d\s+\w+\s*;/g, "");
+  const pairs = new Map();
+  // GLSL reserves "__", so a combined sampler is named <texture>_S_<sampler>.
+  const sampleCall = (fn) => (m, tex, samp) => {
+    pairs.set(`${tex}_S_${samp}`, { tex, samp });
+    return `${fn}(${tex}_S_${samp},`;
+  };
+  src = src.replace(/(\w+)\.SampleLevel\(\s*(\w+)\s*,/g, sampleCall("textureLod"));
+  src = src.replace(/(\w+)\.Sample\(\s*(\w+)\s*,/g, sampleCall("texture"));
+  src = src.replace(/\bfloat([234])\b/g, "vec$1")
+           .replace(/\bint([234])\b/g, "ivec$1")
+           .replace(/\blerp\s*\(/g, "mix(")
+           .replace(/\bfrac\s*\(/g, "fract(")
+           .replace(/\batan2\s*\(/g, "atan(")
+           .replace(/\brsqrt\s*\(/g, "inversesqrt(");
+  let decl = "";
+  for (const key of pairs.keys()) decl += `uniform sampler2D ${key};\n`;
+  const header = `#version 300 es
+precision highp float;
+precision highp int;
+float saturate(float x) { return clamp(x, 0.0, 1.0); }
+vec2 saturate(vec2 x) { return clamp(x, 0.0, 1.0); }
+vec3 saturate(vec3 x) { return clamp(x, 0.0, 1.0); }
+vec4 saturate(vec4 x) { return clamp(x, 0.0, 1.0); }
+`;
+  return { body: header + decl + src, techniques, samplers, pairs };
+}
+
+const VS = `#version 300 es
+in vec2 a_pos;
+uniform vec4 u_rect;
+uniform vec2 u_canvas;
+out vec2 v_uv;
+void main() {
+  vec2 px = u_rect.xy + a_pos * u_rect.zw;
+  v_uv = a_pos;
+  gl_Position = vec4(px.x / u_canvas.x * 2.0 - 1.0, 1.0 - px.y / u_canvas.y * 2.0, 0.0, 1.0);
+}`;
+
+// Procedural stand-in for a desktop: sidebar, panels and lines of "text".
+const BG_FS = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform vec2 u_canvas;
+uniform float u_mode;
+out vec4 o;
+float h(float n) { return fract(sin(n * 12.9898) * 43758.5453); }
+void main() {
+  vec2 p = v_uv * u_canvas;
+  if (u_mode > 1.5) { o = vec4(vec3(0.42), 1.0); return; }
+  bool dark = u_mode < 0.5;
+  vec3 base = dark ? vec3(0.118, 0.122, 0.133) : vec3(0.965, 0.969, 0.976);
+  vec3 side = dark ? vec3(0.09, 0.094, 0.106) : vec3(0.91, 0.918, 0.93);
+  vec3 txt  = dark ? vec3(0.35, 0.38, 0.45) : vec3(0.62, 0.65, 0.7);
+  vec3 acc  = dark ? vec3(0.32, 0.55, 0.85) : vec3(0.15, 0.4, 0.8);
+  vec3 c = p.x < 220.0 ? side : base;
+  float row = floor(p.y / 24.0);
+  float x0 = p.x < 220.0 ? 24.0 : 260.0 + 28.0 * floor(h(row * 3.1) * 4.0);
+  float len = (p.x < 220.0 ? 90.0 : 240.0) + 520.0 * h(row);
+  float y = mod(p.y, 24.0);
+  if (y > 8.0 && y < 15.0 && p.x > x0 && p.x < x0 + len && h(row * 7.7) > 0.18)
+    c = h(row * 1.3) > 0.85 ? acc : txt;
+  if (p.y < 44.0) c = dark ? vec3(0.07, 0.075, 0.085) : vec3(1.0);
+  o = vec4(c, 1.0);
+}`;
+
+function compile(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    const log = gl.getShaderInfoLog(s);
+    const lines = src.split("\n");
+    const m = log.match(/0:(\d+)/);
+    const ctx = m ? lines.slice(Math.max(0, +m[1] - 3), +m[1] + 2).map((l, i) => `${+m[1] - 2 + i}: ${l}`).join("\n") : "";
+    throw new Error(log + "\n" + ctx);
+  }
+  return s;
+}
+function program(vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.bindAttribLocation(p, 0, "a_pos");
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  return p;
+}
+
+function loadImage(url) {
+  return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error("load " + url)); i.src = url; });
+}
+
+const hex = (s) => [1, 3, 5].map((i) => parseInt(s.slice(i, i + 2), 16) / 255);
+
+// ---------------------------------------------------------------- setup
+let programs = {}, units = [], bgProg, quad;
+async function init() {
+  const base = "../../premium_click_fx/";
+  const src = await (await fetch(base + "click_fx.effect", { cache: "no-store" })).text();
+  const fx = translateEffect(src);
+  const texNames = ["noise", "brush", "ramp", "hud", "matcap"];
+  const files = { noise: "noise.png", brush: "brush.png", ramp: "ramps.png", hud: "hud.png", matcap: "matcap.png" };
+  const textures = {};
+  gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  for (const n of texNames) {
+    const img = await loadImage(base + "textures/" + files[n] + "?v=" + Date.now());
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    textures[n + "_tex"] = t;
+  }
+  // One texture unit per (texture, sampler) pair, each with its own sampler object.
+  let unit = 0;
+  for (const [key, { tex, samp }] of fx.pairs) {
+    const st = fx.samplers[samp];
+    const so = gl.createSampler();
+    const wrap = (m) => (m === "wrap" ? gl.REPEAT : gl.CLAMP_TO_EDGE);
+    const filt = st.filter === "point" ? gl.NEAREST : gl.LINEAR;
+    gl.samplerParameteri(so, gl.TEXTURE_WRAP_S, wrap(st.u));
+    gl.samplerParameteri(so, gl.TEXTURE_WRAP_T, wrap(st.v));
+    gl.samplerParameteri(so, gl.TEXTURE_MIN_FILTER, filt);
+    gl.samplerParameteri(so, gl.TEXTURE_MAG_FILTER, filt);
+    units.push({ key, unit, tex: textures[tex], sampler: so });
+    unit++;
+  }
+  for (const [tech, ps] of Object.entries(fx.techniques)) {
+    const fs = fx.body + `
+in vec2 v_uv;
+out vec4 o_color;
+void main() { VertData v; v.pos = vec4(0.0); v.uv = v_uv; o_color = ${ps}(v); }`;
+    try {
+      const p = program(VS, fs);
+      const u = {};
+      for (const n of ["u_rect", "u_canvas", "fx_quad", "fx_anim", "fx_shape", "fx_clip",
+                       "fx_col_a", "fx_col_b", "fx_col_c", "fx_col_d"]) u[n] = gl.getUniformLocation(p, n);
+      gl.useProgram(p);
+      for (const un of units) {
+        const loc = gl.getUniformLocation(p, un.key);
+        if (loc) gl.uniform1i(loc, un.unit);
+      }
+      programs[tech] = { p, u };
+    } catch (e) {
+      fail(`technique ${tech}: ${e.message}`);
+    }
+  }
+  bgProg = program(VS, BG_FS);
+  quad = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+}
+
+// ---------------------------------------------------------------- drawing
+let W = 0, H = 0;
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  W = Math.round(canvas.clientWidth * dpr);
+  H = Math.round(canvas.clientHeight * dpr);
+  if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
+}
+
+function bindUnits() {
+  for (const un of units) {
+    gl.activeTexture(gl.TEXTURE0 + un.unit);
+    gl.bindTexture(gl.TEXTURE_2D, un.tex);
+    gl.bindSampler(un.unit, un.sampler);
+  }
+}
+
+function drawBackground(mode, rect) {
+  gl.disable(gl.BLEND);
+  gl.useProgram(bgProg);
+  gl.uniform4f(gl.getUniformLocation(bgProg, "u_rect"), rect[0], rect[1], rect[2], rect[3]);
+  gl.uniform2f(gl.getUniformLocation(bgProg, "u_canvas"), W, H);
+  gl.uniform1f(gl.getUniformLocation(bgProg, "u_mode"), mode);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+// Draws one effect exactly as the Lua source does: a quad around the click.
+function drawFx(tech, st, styleIndex, x, y, age, seed, R, opacity, clip, extOverride) {
+  const pr = programs[tech];
+  if (!pr) return;
+  const ext = extOverride || st.ext;
+  const qx = ext[0] * R, qy = ext[1] * R, qw = (ext[2] - ext[0]) * R, qh = (ext[3] - ext[1]) * R;
+  gl.useProgram(pr.p);
+  const u = pr.u;
+  gl.uniform4f(u.u_rect, x + qx, y + qy, qw, qh);
+  gl.uniform2f(u.u_canvas, W, H);
+  gl.uniform4f(u.fx_quad, qx, qy, qw, qh);
+  gl.uniform4f(u.fx_anim, age, st.dur, seed, 0);
+  gl.uniform4f(u.fx_shape, R, opacity, 0, styleIndex);
+  gl.uniform4f(u.fx_clip, clip[0], clip[1], clip[2], clip[3]);
+  const cols = st.colors.map(hex);
+  gl.uniform4f(u.fx_col_a, ...cols[0], 0);
+  gl.uniform4f(u.fx_col_b, ...cols[1], 0);
+  gl.uniform4f(u.fx_col_c, ...cols[2], 0);
+  gl.uniform4f(u.fx_col_d, ...cols[3], 0);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+// ---------------------------------------------------------------- interaction
+const ui = {
+  style: document.getElementById("style"), size: document.getElementById("size"),
+  speed: document.getElementById("speed"), bg: document.getElementById("bg"),
+  auto: document.getElementById("auto"), sheet: document.getElementById("sheetBtn"),
+  labels: document.getElementById("labels"),
+};
+STYLES.forEach((s, i) => ui.style.add(new Option(s.name, i)));
+ui.style.add(new Option("Random", -1));
+ui.style.add(new Option("Cycle", -2));
+
+let clock = 0, last = performance.now() / 1000, effects = [], hold = null, cycle = 0, nextAuto = 0, sheet = null;
+// Same rule as the Lua source (BASE_RADIUS), simulating a 1440p capture.
+const radius = (st) => 0.065 * 1440 * parseFloat(ui.size.value) * st.rmul * (W / canvas.clientWidth || 1) / (window.devicePixelRatio || 1);
+
+function pickStyle() {
+  const v = parseInt(ui.style.value, 10);
+  if (v >= 0) return v;
+  if (v === -1) return Math.floor(Math.random() * STYLES.length);
+  return cycle++ % STYLES.length;
+}
+function spawn(x, y) {
+  const si = pickStyle();
+  effects.push({ si, x, y, t0: clock, seed: Math.random() });
+  if (effects.length > 32) effects.shift();
+  return si;
+}
+function canvasPos(e) {
+  const r = canvas.getBoundingClientRect();
+  return [(e.clientX - r.left) * W / r.width, (e.clientY - r.top) * H / r.height];
+}
+canvas.addEventListener("pointerdown", (e) => {
+  sheet = null; ui.labels.textContent = "";
+  canvas.setPointerCapture(e.pointerId);
+  const [x, y] = canvasPos(e);
+  const si = spawn(x, y);
+  hold = { si, x, y, t0: clock, rel: null, seed: Math.random() };
+});
+canvas.addEventListener("pointermove", (e) => { if (hold && hold.rel === null) [hold.x, hold.y] = canvasPos(e); });
+const release = () => { if (hold && hold.rel === null) hold.rel = clock; };
+canvas.addEventListener("pointerup", release);
+canvas.addEventListener("pointercancel", release);
+ui.sheet.addEventListener("click", () => openSheet(Math.max(0, parseInt(ui.style.value, 10)), 12));
+
+// Contact sheet: one effect frozen at evenly spaced ages.
+function openSheet(si, n) {
+  sheet = { si, n };
+  effects = [];
+}
+function drawSheet() {
+  const st = STYLES[sheet.si];
+  const ages = params.has("ages") ? params.get("ages").split(",").map(parseFloat) : null;
+  if (ages) sheet.n = ages.length;
+  const cols = Math.min(sheet.n, parseInt(params.get("cols") || "6", 10));
+  const rows = Math.ceil(sheet.n / cols);
+  const cw = W / cols, ch = H / rows;
+  const ext = st.ext;
+  const R = Math.min(cw / (ext[2] - ext[0]), ch / (ext[3] - ext[1])) * parseFloat(params.get("fill") || "1");
+  ui.labels.textContent = "";
+  const dpr = W / canvas.clientWidth;
+  for (let i = 0; i < sheet.n; i++) {
+    const cx = (i % cols) * cw, cy = Math.floor(i / cols) * ch;
+    const age = ages ? ages[i] : (i + 0.5) / sheet.n * st.dur;
+    const x = cx + cw * (-ext[0]) / (ext[2] - ext[0]);
+    const y = cy + ch * (-ext[1]) / (ext[3] - ext[1]);
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(Math.round(cx), Math.round(H - cy - ch), Math.round(cw), Math.round(ch));
+    drawBackground(parseFloat(ui.bg.value), [0, 0, W, H]);
+    drawFx(st.tech, st, sheet.si, x, y, age, 0.37 + i * 0, R, 1.0, [x - cx, y - cy, cw, ch]);
+    gl.disable(gl.SCISSOR_TEST);
+    const lab = document.createElement("span");
+    lab.textContent = `${st.name}  t=${age.toFixed(2)}s`;
+    lab.style.left = (cx / dpr + 6) + "px";
+    lab.style.top = (cy / dpr + 6) + "px";
+    ui.labels.appendChild(lab);
+  }
+}
+
+function frame() {
+  resize();
+  const now = performance.now() / 1000;
+  const dt = Math.min(now - last, 0.1);
+  last = now;
+  clock += dt;
+  gl.viewport(0, 0, W, H);
+  if (sheet) {
+    drawSheet();
+    requestAnimationFrame(frame);
+    return;
+  }
+  drawBackground(parseFloat(ui.bg.value), [0, 0, W, H]);
+  bindUnits();
+  const speed = parseFloat(ui.speed.value);
+  if (ui.auto.checked && clock > nextAuto) {
+    spawn(W * (0.2 + 0.6 * Math.random()), H * (0.25 + 0.55 * Math.random()));
+    nextAuto = clock + 0.55 + Math.random() * 0.5;
+  }
+  effects = effects.filter((e) => (clock - e.t0) * speed < STYLES[e.si].dur);
+  for (const e of effects) {
+    const st = STYLES[e.si];
+    drawFx(st.tech, st, e.si, e.x, e.y, (clock - e.t0) * speed, e.seed, radius(st), 1.0, [e.x, e.y, W, H]);
+  }
+  if (hold) {
+    const held = (hold.rel === null ? clock : hold.rel) - hold.t0;
+    let a = Math.min(1, Math.max(0, (held - HOLD_DELAY) / HOLD_FADE_IN));
+    if (hold.rel !== null) a *= Math.max(0, 1 - (clock - hold.rel) / HOLD_FADE_OUT);
+    if (hold.rel !== null && clock - hold.rel > HOLD_FADE_OUT) hold = null;
+    else if (a > 0) {
+      const st = STYLES[hold.si];
+      drawFx("Hold", st, hold.si, hold.x, hold.y, Math.max(0, held - HOLD_DELAY), hold.seed, radius(st), a,
+             [hold.x, hold.y, W, H], HOLD_EXT);
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+init().then(() => {
+  bindUnits();
+  if (params.has("bg")) ui.bg.value = params.get("bg");
+  if (params.has("sheet")) {
+    const si = STYLES.findIndex((s) => s.tech === params.get("sheet") || s.name === params.get("sheet"));
+    openSheet(Math.max(0, si), parseInt(params.get("n") || "12", 10));
+  }
+  if (params.has("hold")) {
+    // Freeze a grid of hold indicators, one per style, for inspection.
+    sheet = null;
+    const t = parseFloat(params.get("hold"));
+    const drawHolds = () => {
+      resize();
+      gl.viewport(0, 0, W, H);
+      drawBackground(parseFloat(ui.bg.value), [0, 0, W, H]);
+      bindUnits();
+      STYLES.forEach((st, i) => {
+        const x = W * (i + 0.5) / STYLES.length, y = H * 0.5;
+        const R = Math.min(W / STYLES.length / 1.6, H / 1.6);
+        drawFx("Hold", st, i, x, y, t, 0.37, R, 1.0, [x, y, W, H], HOLD_EXT);
+      });
+      requestAnimationFrame(drawHolds);
+    };
+    drawHolds();
+    return;
+  }
+  if (params.has("auto")) ui.auto.checked = true;
+  requestAnimationFrame(frame);
+}).catch((e) => fail(e.stack || String(e)));
+</script>
+</body>
+</html>
