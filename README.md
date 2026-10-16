@@ -11,6 +11,7 @@ Built with LuaJIT 5.2 and FFI for high performance. **Windows only**.
 
 ## Demo
 
+https://github.com/user-attachments/assets/d22d72cc-6837-47d1-b473-54d15a977a95
 
 ## Limitations
 
