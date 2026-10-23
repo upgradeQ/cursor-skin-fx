@@ -2,7 +2,7 @@
   Motion Blur Cursor — OBS Studio Lua script (Windows)
 
   Registers a "Motion Blur Cursor" source that draws a vector cursor
-  (arrow / text I-beam / wait spinner) following the system mouse, with
+  (arrow / text I-beam / wait spinner / link hand) following the system mouse, with
   spring-smoothed movement and true motion blur along the curved path the
   cursor travelled during the shutter interval.
 
@@ -33,7 +33,7 @@ local user32 = ffi.load("user32")
 
 local SOURCE_ID = "motion_blur_cursor"
 
-local SHAPE_AUTO, SHAPE_ARROW, SHAPE_TEXT, SHAPE_WAIT = -1, 0, 1, 2
+local SHAPE_AUTO, SHAPE_ARROW, SHAPE_TEXT, SHAPE_WAIT, SHAPE_HAND = -1, 0, 1, 2, 3
 
 local MONITOR_CUSTOM, MONITOR_PRIMARY = -1, -2
 
@@ -141,6 +141,39 @@ float sd_ibeam(float2 p)
 	return smin(stem, serif, 1.4) - 0.8;
 }
 
+// Link-select hand pointing up, hotspot at the index fingertip.
+float sd_hand(float2 p)
+{
+	float fingers = sd_segment(p, float2(0.0, 1.7), float2(0.0, 11.0)) - 1.7;
+	fingers = min(fingers, sd_segment(p, float2(3.4, 8.2), float2(3.4, 12.0)) - 1.7);
+	fingers = min(fingers, sd_segment(p, float2(6.8, 9.2), float2(6.8, 12.0)) - 1.7);
+	fingers = min(fingers, sd_segment(p, float2(10.0, 10.4), float2(10.0, 12.5)) - 1.5);
+
+	float2 v0 = float2(-1.0, 10.5);
+	float2 v1 = float2(10.9, 10.5);
+	float2 v2 = float2(10.9, 15.2);
+	float2 v3 = float2(8.4, 19.4);
+	float2 v4 = float2(1.2, 19.4);
+	float2 v5 = float2(-1.0, 16.6);
+	float2 ds = float2(dot(p - v0, p - v0), 1.0);
+	ds = poly_edge(ds, p, v5, v0);
+	ds = poly_edge(ds, p, v0, v1);
+	ds = poly_edge(ds, p, v1, v2);
+	ds = poly_edge(ds, p, v2, v3);
+	ds = poly_edge(ds, p, v3, v4);
+	ds = poly_edge(ds, p, v4, v5);
+	float palm = ds.y * sqrt(ds.x) - 0.6;
+
+	float thumb = sd_segment(p, float2(0.0, 15.6), float2(-4.2, 11.6)) - 1.6;
+	float d = smin(min(fingers, palm), thumb, 1.2);
+
+	// Creases between the curled fingers, drawn in the outline colour.
+	float g = min(sd_segment(p, float2(1.7, 7.0), float2(1.7, 12.2)),
+	              sd_segment(p, float2(5.1, 8.5), float2(5.1, 12.6)));
+	g = min(g, sd_segment(p, float2(8.5, 9.6), float2(8.5, 12.9)));
+	return max(d, 0.35 - g);
+}
+
 // Busy spinner: a ring with a rotating comet. Returns (distance, fill alpha).
 float2 sd_spinner(float2 p)
 {
@@ -157,8 +190,10 @@ float2 shape_eval(float id, float2 p)
 		r = float2(sd_arrow(p), 1.0);
 	else if (id < 1.5)
 		r = float2(sd_ibeam(p), 1.0);
-	else
+	else if (id < 2.5)
 		r = sd_spinner(p);
+	else
+		r = float2(sd_hand(p), 1.0);
 	return r;
 }
 
@@ -241,6 +276,7 @@ local function load_cursor_handles()
 		ibeam       = load(32513),
 		wait        = load(32514),
 		appstarting = load(32650),
+		hand        = load(32649),
 	}
 end
 
@@ -336,6 +372,7 @@ local function detect_shape(d, ci)
 	local h = ci.hCursor
 	if h == d.cursors.ibeam then return SHAPE_TEXT end
 	if h == d.cursors.wait or h == d.cursors.appstarting then return SHAPE_WAIT end
+	if h == d.cursors.hand then return SHAPE_HAND end
 	return SHAPE_ARROW
 end
 
@@ -464,7 +501,7 @@ local function render(d)
 	end
 
 	local scale = d.size * d.click
-	local margin = (24 + d.outline_w + math.abs(d.shadow_x) + math.abs(d.shadow_y) + d.shadow_blur * 2) * scale + 2
+	local margin = (26 + d.outline_w + math.abs(d.shadow_x) + math.abs(d.shadow_y) + d.shadow_blur * 2) * scale + 2
 	local bx0 = math.max(0, math.floor(math.min(x0, x1, x2) - margin))
 	local by0 = math.max(0, math.floor(math.min(y0, y1, y2) - margin))
 	local bx1 = math.min(d.region.w, math.ceil(math.max(x0, x1, x2) + margin))
@@ -668,6 +705,7 @@ local function get_properties()
 	obs.obs_property_list_add_int(style, "Arrow", SHAPE_ARROW)
 	obs.obs_property_list_add_int(style, "Text", SHAPE_TEXT)
 	obs.obs_property_list_add_int(style, "Wait", SHAPE_WAIT)
+	obs.obs_property_list_add_int(style, "Hand", SHAPE_HAND)
 	obs.obs_properties_add_float_slider(look, "scale", "Scale", 0.5, 6, 0.05)
 	obs.obs_properties_add_color_alpha(look, "fill_color", "Fill colour")
 	obs.obs_properties_add_color_alpha(look, "outline_color", "Outline colour")
@@ -701,7 +739,7 @@ local source_def = {
 
 function script_description()
 	return [[<h3>Motion Blur Cursor</h3>
-<p>Adds a <b>Motion Blur Cursor</b> source: a vector cursor (arrow, text, wait)
+<p>Adds a <b>Motion Blur Cursor</b> source: a vector cursor (arrow, text, wait, hand)
 with spring-smoothed movement and real motion blur.</p>
 <p>Put it above your Display Capture with the same position and size, and
 turn off <i>Capture Cursor</i> on the Display Capture.</p>]]
